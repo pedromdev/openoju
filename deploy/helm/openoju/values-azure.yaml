@@ -1,0 +1,88 @@
+# =============================================================================
+# Azure: AKS + Azure Database for PostgreSQL + MinIO no cluster
+#
+# O Azure Blob Storage não fala a API S3, então o MinIO roda dentro do cluster
+# (PVC em Azure Disk) e o bucket é criado pelo job de init do chart.
+# =============================================================================
+
+replicaCount:
+  api: 2
+  worker: 2
+  dispatcher: 1
+  maintenance: 1
+
+serviceAccount:
+  create: true
+  annotations:
+    azure.workload.identity/client-id: 00000000-0000-0000-0000-000000000000
+
+secrets:
+  create: false
+
+config:
+  OJU_PUBLIC_BASE_URL: https://openoju.example.com
+  OJU_FRONTEND_BASE_URL: https://openoju.example.com
+  OJU_CORS_ORIGINS: https://openoju.example.com
+  OJU_STORAGE_BACKEND: s3
+  OJU_S3_ENDPOINT: https://s3.openoju.example.com
+  OJU_S3_INTERNAL_ENDPOINT: http://openoju-openoju-minio:9000
+  OJU_S3_BUCKET: openoju
+  OJU_S3_REGION: us-east-1
+  OJU_S3_CREATE_BUCKET: "false"
+  OJU_RATE_LIMIT_BACKEND: postgres
+
+minio:
+  enabled: true
+  persistence:
+    size: 500Gi
+    storageClassName: managed-csi
+  public:
+    enabled: true
+    host: s3.openoju.example.com
+    className: nginx
+    tlsSecret: openoju-minio-tls
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+
+media:
+  mode: emptyDir
+  emptyDir:
+    sizeLimit: 50Gi
+
+data:
+  mode: emptyDir
+
+vaapi:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+  hosts:
+    - host: openoju.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts: [openoju.example.com]
+      secretName: openoju-tls
+
+# MinIO precisa de host público próprio para as URLs assinadas.
+
+pdb:
+  enabled: true
+
+nodeSelector:
+  openoju.io/pool: app
+
+networkPolicy:
+  enabled: true
+  allowDNS: true

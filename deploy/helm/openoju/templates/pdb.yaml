@@ -1,0 +1,35 @@
+{{- if .Values.pdb.enabled }}
+{{- if gt (int .Values.replicaCount.api) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "openoju.fullname" . }}-api
+  labels:
+    {{- include "openoju.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  minAvailable: {{ .Values.pdb.api.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "openoju.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+{{- end }}
+{{- if gt (int .Values.replicaCount.worker) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "openoju.fullname" . }}-worker
+  labels:
+    {{- include "openoju.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  minAvailable: {{ .Values.pdb.worker.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "openoju.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+{{- end }}
+{{- end }}

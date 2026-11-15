@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "openoju.fullname" . }}-test
+  labels:
+    {{- include "openoju.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- include "openoju.podSecurityContext" . | nindent 4 }}
+  containers:
+    - name: health
+      image: "{{ include "openoju.image" . }}"
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - python
+        - -c
+        - |
+          import json
+          import sys
+          import urllib.request
+
+          url = "http://{{ include "openoju.fullname" . }}:{{ .Values.service.port }}/api/health"
+          with urllib.request.urlopen(url, timeout=10) as response:
+              payload = json.load(response)
+          print(json.dumps(payload, indent=2))
+          if payload.get("status") not in {"ok", "degraded"}:
+              sys.exit(1)

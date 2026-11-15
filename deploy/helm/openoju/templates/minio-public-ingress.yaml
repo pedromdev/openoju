@@ -1,0 +1,34 @@
+{{- if and .Values.minio.enabled .Values.minio.public.enabled }}
+{{- $name := include "openoju.fullname" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}-minio
+  labels:
+    {{- include "openoju.labels" . | nindent 4 }}
+    app.kubernetes.io/component: minio
+  {{- with .Values.minio.public.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.minio.public.className }}
+  ingressClassName: {{ .Values.minio.public.className }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.minio.public.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}-minio
+                port:
+                  number: 9000
+  {{- if .Values.minio.public.tlsSecret }}
+  tls:
+    - hosts: [{{ .Values.minio.public.host }}]
+      secretName: {{ .Values.minio.public.tlsSecret }}
+  {{- end }}
+{{- end }}

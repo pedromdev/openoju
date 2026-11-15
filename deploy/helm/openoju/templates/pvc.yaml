@@ -1,4 +1,4 @@
-{{- if not .Values.data.existingClaim }}
+{{- if and (not .Values.data.existingClaim) (eq .Values.data.mode "pvc") }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -14,7 +14,7 @@ spec:
     requests:
       storage: {{ .Values.data.size }}
 {{- end }}
-{{- if not .Values.media.existingClaim }}
+{{- if and (not .Values.media.existingClaim) (eq .Values.media.mode "pvc") }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
