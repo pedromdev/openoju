@@ -326,6 +326,11 @@ def default_answers(name: str, target: str) -> dict[str, str]:
         "node_count": "2",
         "gcp_project": "",
         "azure_subscription": "",
+        "db_deletion_protection": "true",
+        "bucket_force_destroy": "false",
+        "system_node_count": "2",
+        "image_repository": "",
+        "image_tag": "",
         "mgc_key_pair_id": "",
         "db_instance": {
             "aws": "db.t4g.medium",
@@ -421,6 +426,11 @@ def values_for(answers: dict[str, str]) -> dict:
     storage = answers["storage"]
 
     values: dict = {
+        "image": {
+            "repository": answers.get("image_repository")
+            or "ghcr.io/pedromdev/openoju",
+            "tag": answers.get("image_tag") or "0.3.0",
+        },
         "replicaCount": {
             "api": replicas,
             "worker": max(1, replicas if spec["cloud"] else 1),
@@ -548,6 +558,7 @@ def tfvars_for(answers: dict[str, str]) -> dict:
         "environment": answers["environment"],
         "region": answers["region"],
         "node_count": int(answers["node_count"]),
+        "system_node_count": int(answers.get("system_node_count") or 2),
         "cluster_mode": answers["cluster_mode"],
         "domain": answers["domain"],
         "namespace": answers["namespace"],
@@ -562,6 +573,8 @@ def tfvars_for(answers: dict[str, str]) -> dict:
             data["subscription_id"] = answers["azure_subscription"]
     if target == "gcp" and answers.get("gcp_project"):
         data["project_id"] = answers["gcp_project"]
+    data["db_deletion_protection"] = answers.get("db_deletion_protection", "true") == "true"
+    data["bucket_force_destroy"] = answers.get("bucket_force_destroy", "false") == "true"
     if target == "magalu":
         # Só o ID público; o secret e a API key vêm de TF_VAR_* no ambiente.
         if answers.get("mgc_key_pair_id"):

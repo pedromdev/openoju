@@ -6,7 +6,7 @@ variable "environment" {
 variable "cluster_version" {
   description = "Versão do Kubernetes do EKS."
   type        = string
-  default     = "1.31"
+  default     = "1.37"
 }
 
 variable "vpc_cidr" {
@@ -43,4 +43,10 @@ variable "tags" {
   description = "Tags adicionais."
   type        = map(string)
   default     = {}
+}
+
+variable "system_node_count" {
+  description = "Nós do pool de sistema (addons)."
+  type        = number
+  default     = 2
 }

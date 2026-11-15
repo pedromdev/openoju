@@ -18,7 +18,7 @@ output "bucket_arn" {
 }
 
 output "service_account_annotations" {
-  value = var.oidc_provider_arn == "" ? {} : {
+  value = var.create_irsa ? {
     "eks.amazonaws.com/role-arn" = aws_iam_role.app[0].arn
-  }
+  } : {}
 }

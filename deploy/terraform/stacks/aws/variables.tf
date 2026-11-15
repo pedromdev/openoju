@@ -97,11 +97,29 @@ variable "existing_oidc_issuer" {
 variable "cluster_version" {
   description = "Versão do Kubernetes."
   type        = string
-  default     = "1.31"
+  default     = "1.37"
 }
 
 variable "app_instance_types" {
   description = "Tipos de instância do pool de aplicação."
   type        = list(string)
   default     = ["m7i.large"]
+}
+
+variable "db_deletion_protection" {
+  description = "Protege o RDS contra remoção acidental."
+  type        = bool
+  default     = true
+}
+
+variable "bucket_force_destroy" {
+  description = "Permite destruir o bucket com objetos (apenas validação)."
+  type        = bool
+  default     = false
+}
+
+variable "system_node_count" {
+  description = "Nós do pool de sistema."
+  type        = number
+  default     = 2
 }

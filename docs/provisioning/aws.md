@@ -29,6 +29,53 @@ O stack `deploy/terraform/stacks/aws` cria:
 | S3 | SSE, versioning, lifecycle, CORS, bloqueio de acesso público |
 | IRSA | role com permissão apenas no bucket/prefixo do OpenOju |
 
+## Cota de vCPU
+
+A cota padrão de "Running On-Demand Standard" em contas novas costuma ser **5
+vCPUs**. O stack padrão pede 2 nós `system` + `node_count` nós `app`; com
+`m7i.large` (2 vCPU cada) isso são 8 vCPUs se `node_count=2`.
+
+Para validar sem pedir aumento:
+
+```hcl
+system_node_count = 1
+node_count        = 1
+```
+
+Total: 4 vCPUs, cabe na cota. Para produção, peça aumento
+(`aws service-quotas request-service-quota-increase --service-code ec2 --quota-code L-1216C47A --desired-value 32`)
+ou use instâncias maiores.
+
+## Imagem no ECR
+
+A imagem pública `ghcr.io/pedromdev/openoju:<tag>` só existe para tags de
+release do repositório. Em ambientes novos, publique no ECR antes do Helm:
+
+```bash
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+REGION=us-east-1
+REPO=openoju-val
+
+aws ecr create-repository --repository-name "$REPO" --region "$REGION" \
+  --image-scanning-configuration scanOnPush=true
+
+aws ecr get-login-password --region "$REGION" \
+  | docker login --username AWS --password-stdin "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
+
+docker build --platform linux/amd64 -t "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO:val" .
+docker push "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPO:val"
+```
+
+Depois aponte no `answers.yaml` (o wizard injeta no chart):
+
+```yaml
+image_repository: <account>.dkr.ecr.<region>.amazonaws.com/openoju-val
+image_tag: val
+```
+
+O node role já tem `AmazonEC2ContainerRegistryReadOnly`, então não é preciso
+`imagePullSecrets`.
+
 ## Valores relevantes
 
 - `serviceAccount.annotations` recebe a role IRSA via output.

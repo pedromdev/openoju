@@ -62,17 +62,18 @@ resource "aws_db_instance" "this" {
   backup_window              = "04:00-05:00"
   maintenance_window         = "sun:05:00-sun:06:00"
   auto_minor_version_upgrade = true
-  deletion_protection        = true
-  skip_final_snapshot        = false
+  deletion_protection        = var.db_deletion_protection
+  skip_final_snapshot        = !var.db_deletion_protection
   final_snapshot_identifier  = "${local.name}-postgres-final"
   apply_immediately          = false
   tags                       = local.tags
 }
 
 resource "aws_s3_bucket" "media" {
-  count  = var.create_bucket ? 1 : 0
-  bucket = local.bucket
-  tags   = local.tags
+  count         = var.create_bucket ? 1 : 0
+  bucket        = local.bucket
+  force_destroy = var.bucket_force_destroy
+  tags          = local.tags
 }
 
 resource "aws_s3_bucket_versioning" "media" {
@@ -155,7 +156,7 @@ data "aws_iam_policy_document" "app_assume" {
 }
 
 resource "aws_iam_role" "app" {
-  count              = var.oidc_provider_arn == "" ? 0 : 1
+  count              = var.create_irsa ? 1 : 0
   name               = "${local.name}-s3"
   assume_role_policy = data.aws_iam_policy_document.app_assume.json
   tags               = local.tags
@@ -185,7 +186,7 @@ data "aws_iam_policy_document" "app_s3" {
 }
 
 resource "aws_iam_role_policy" "app_s3" {
-  count  = var.oidc_provider_arn == "" || !var.create_bucket ? 0 : 1
+  count  = var.create_irsa ? 1 : 0
   name   = "${local.name}-s3"
   role   = aws_iam_role.app[0].id
   policy = data.aws_iam_policy_document.app_s3.json

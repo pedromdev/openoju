@@ -115,3 +115,25 @@ def test_save_upload_with_s3_backend_keeps_no_local_source(
     finally:
         db.close()
         services  # keep the import referenced for linters
+
+
+def test_s3_client_falls_back_to_public_endpoint(monkeypatch):
+    from app import storage
+
+    captured: dict = {}
+
+    def fake_client(name, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(storage.boto3, "client", fake_client)
+    settings = storage.get_settings().model_copy(
+        update={
+            "s3_endpoint": "https://s3.us-east-1.amazonaws.com",
+            "s3_internal_endpoint": "",
+            "s3_access_key": "key",
+            "s3_secret_key": "secret",
+        }
+    )
+    storage._client(settings, public=False)
+    assert captured["endpoint_url"] == "https://s3.us-east-1.amazonaws.com"

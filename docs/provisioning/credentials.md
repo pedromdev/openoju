@@ -58,6 +58,31 @@ KMS. Ela é ampla por natureza: EKS exige `iam:PassRole` e criação de roles. E
 produção, depois do primeiro apply, restrinja por `Resource`/condições ou separe
 uma role só para o state.
 
+### Root não serve para o EKS
+
+O usuário root autentica o Terraform (via `aws login`), mas **não é um principal
+válido no EKS** e também não pode assumir roles. Para o `kubectl`/Helm
+funcionarem, crie um usuário IAM de validação:
+
+```bash
+aws iam create-user --user-name openoju-val-admin
+aws iam attach-user-policy --user-name openoju-val-admin \
+  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+aws iam create-access-key --user-name openoju-val-admin
+```
+
+Exporte as chaves em um arquivo `600` e use esse usuário no `apply`. O módulo
+cria a access entry do criador e habilita
+`bootstrap_cluster_creator_admin_permissions`, então o `update-kubeconfig`
+funciona de imediato. Ao terminar, apague o usuário:
+
+```bash
+aws iam delete-access-key --user-name openoju-val-admin --access-key-id <id>
+aws iam detach-user-policy --user-name openoju-val-admin \
+  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+aws iam delete-user --user-name openoju-val-admin
+```
+
 ### Verificação e limites
 
 ```bash

@@ -21,9 +21,10 @@ class StorageError(RuntimeError):
 
 
 def _client(settings: Settings, *, public: bool):
-    endpoint = (
-        settings.s3_endpoint if public and settings.s3_endpoint else settings.s3_internal_endpoint
-    )
+    if public:
+        endpoint = settings.s3_endpoint or settings.s3_internal_endpoint
+    else:
+        endpoint = settings.s3_internal_endpoint or settings.s3_endpoint
     if not endpoint:
         raise StorageError("endpoint S3 não configurado")
     credentials = {}

@@ -94,3 +94,21 @@ variable "create_bucket" {
   type        = bool
   default     = true
 }
+
+variable "db_deletion_protection" {
+  description = "Protege o RDS contra remoção acidental (desligue só em validação)."
+  type        = bool
+  default     = true
+}
+
+variable "bucket_force_destroy" {
+  description = "Permite destruir o bucket mesmo com objetos (use só em validação)."
+  type        = bool
+  default     = false
+}
+
+variable "create_irsa" {
+  description = "Cria a role IRSA de acesso ao bucket (deve ser conhecido no plan)."
+  type        = bool
+  default     = true
+}
