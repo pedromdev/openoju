@@ -1197,27 +1197,32 @@ def action_destroy(args: argparse.Namespace) -> int:
         if typed != answers["environment"]:
             print("cancelado")
             return 1
-    run(
-        [
-            "helm",
-            "uninstall",
-            answers["release"],
-            "-n",
-            answers["namespace"],
-            "--ignore-not-found",
-        ]
-    )
-    run(
-        [
-            "kubectl",
-            "-n",
-            answers["namespace"],
-            "delete",
-            "secret",
-            f"{answers['release']}-secrets",
-            "--ignore-not-found",
-        ]
-    )
+    # O cluster pode já ter sido removido (destroy parcial): não impedir a
+    # limpeza do restante da infraestrutura.
+    try:
+        run(
+            [
+                "helm",
+                "uninstall",
+                answers["release"],
+                "-n",
+                answers["namespace"],
+                "--ignore-not-found",
+            ]
+        )
+        run(
+            [
+                "kubectl",
+                "-n",
+                answers["namespace"],
+                "delete",
+                "secret",
+                f"{answers['release']}-secrets",
+                "--ignore-not-found",
+            ]
+        )
+    except ProvisionError as exc:
+        print(f"aviso: cluster inacessível, seguindo para o Terraform ({exc})")
     stack = terraform_stack(answers)
     if stack is not None:
         directory = env_dir(args.env)

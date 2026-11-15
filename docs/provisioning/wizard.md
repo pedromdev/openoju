@@ -47,6 +47,10 @@ python3 scripts/provision.py init --env prod --answers /tmp/answers.yaml --yes
 
 `answers.yaml` nunca contém segredos; `secrets.env` nunca é versionado.
 
+`destroy` tolera um cluster já removido: se o `helm uninstall` não alcançar o
+API server (destroy parcial anterior), ele avisa e segue para o
+`terraform destroy` do restante da infraestrutura.
+
 ## O que é gerado
 
 ```text
