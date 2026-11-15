@@ -39,6 +39,8 @@ def test_dump_yaml_handles_nested_structures():
     assert 'c: texto' in rendered
     assert '"com: dois pontos"' in rendered
     assert '  - ' in rendered
+    assert '"0"' in provision.dump_yaml({"n": "0"})
+    assert '"true"' in provision.dump_yaml({"b": "true"})
     assert 'j: {}' in rendered
     assert 'k: []' in rendered
 

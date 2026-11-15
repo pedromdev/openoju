@@ -199,17 +199,16 @@ def dump_scalar(value: object) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     text = str(value)
-    if text == "" or re.search(r"[:#\[\]{}]|^\s|\s$", text) or text in {
-        "true",
-        "false",
-        "null",
-        "yes",
-        "no",
-        "on",
-        "off",
-    }:
-        return json.dumps(text)
-    return text
+    quote = False
+    if not text or text != text.strip():
+        quote = True
+    elif any(char in text for char in ":#[]{}"):
+        quote = True
+    elif text[0].isdigit() or text[0] in "-+":
+        quote = True
+    elif text.lower() in {"true", "false", "null", "yes", "no", "on", "off"}:
+        quote = True
+    return json.dumps(text) if quote else text
 
 
 def dump_yaml(data: dict, indent: int = 0) -> str:
@@ -754,7 +753,8 @@ def doctor(answers: dict[str, str]) -> list[str]:
     required = ["helm", "kubectl"]
     if spec["terraform"] and answers["cluster_mode"] == "create":
         required.append("terraform")
-    cloud_cli = {"aws": "aws", "gcp": "gcloud", "azure": "az", "magalu": "mgc"}
+    # O CLI da Magalu é opcional: o Terraform cobre criação e kubeconfig.
+    cloud_cli = {"aws": "aws", "gcp": "gcloud", "azure": "az"}
     if target in cloud_cli:
         required.append(cloud_cli[target])
 
@@ -766,14 +766,18 @@ def doctor(answers: dict[str, str]) -> list[str]:
             problems.append(f"instale {binary}")
 
     print("\nContexto")
+    needs_context = not (spec["cloud"] and answers["cluster_mode"] == "create")
     if which("kubectl"):
         try:
             context = run(["kubectl", "config", "current-context"], capture=True).strip()
             print(f"  kubeconfig: {context or '<vazio>'}")
-            if not context:
+            if not context and needs_context:
                 problems.append("kubeconfig sem contexto atual")
+            elif not context:
+                print("  o kubeconfig será obtido depois do terraform apply")
         except ProvisionError:
-            problems.append("kubectl não conseguiu ler o kubeconfig")
+            if needs_context:
+                problems.append("kubectl não conseguiu ler o kubeconfig")
     if spec["terraform"] and answers["cluster_mode"] == "create":
         stack = TERRAFORM / str(spec["terraform"])
         if not stack.exists():
@@ -1020,6 +1024,9 @@ def namespace_exists(namespace: str) -> bool:
 
 def apply_stdin(manifest: str) -> None:
     print("$ kubectl apply -f - (secret)")
+    env = os.environ.copy()
+    if KUBECONFIG is not None:
+        env["KUBECONFIG"] = str(KUBECONFIG)
     try:
         subprocess.run(
             ["kubectl", "apply", "-f", "-"],
@@ -1027,6 +1034,7 @@ def apply_stdin(manifest: str) -> None:
             text=True,
             check=True,
             cwd=str(ROOT),
+            env=env,
         )
     except subprocess.CalledProcessError as exc:
         raise ProvisionError("falha ao aplicar o Secret") from exc

@@ -77,6 +77,30 @@ jobs:
             -n openoju -f deploy/helm/openoju/${{ matrix.values }} > rendered.yaml
           kubeconform -strict -summary -ignore-missing-schemas rendered.yaml
 
+  wizard:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [local, onprem, aws, gcp, azure, magalu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install kubeconform
+        run: |
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+      - name: Generate environment
+        run: python3 scripts/provision.py init --env ci --target ${{ matrix.target }} --yes
+      - name: Render generated values
+        run: |
+          helm template openoju deploy/helm/openoju \
+            -n openoju -f deploy/environments/ci/values.yaml > rendered.yaml
+          kubeconform -strict -summary -ignore-missing-schemas rendered.yaml
+
   terraform:
     runs-on: ubuntu-latest
     strategy:
