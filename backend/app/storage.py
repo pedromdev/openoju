@@ -52,6 +52,10 @@ class S3Storage:
         try:
             self._server.head_bucket(Bucket=self.bucket)
         except ClientError:
+            if not self.settings.s3_create_bucket:
+                raise StorageError(
+                    f"bucket {self.bucket!r} não encontrado e criação desabilitada"
+                ) from None
             try:
                 self._server.create_bucket(Bucket=self.bucket)
             except (ClientError, BotoCoreError) as exc:
@@ -203,6 +207,23 @@ class S3Storage:
         except (ClientError, BotoCoreError) as exc:
             if strict:
                 raise StorageError(f"falha ao excluir objeto {key}: {exc}") from exc
+
+    def read_bytes(self, key: str) -> bytes:
+        try:
+            response = self._server.get_object(Bucket=self.bucket, Key=key)
+            return response["Body"].read()
+        except (ClientError, BotoCoreError) as exc:
+            raise StorageError(f"falha ao ler objeto {key}: {exc}") from exc
+
+    def open_stream(self, key: str):
+        """Return ``(body, content_length)`` for streaming without loading it all."""
+        try:
+            response = self._server.get_object(Bucket=self.bucket, Key=key)
+        except (ClientError, BotoCoreError) as exc:
+            raise StorageError(f"falha ao ler objeto {key}: {exc}") from exc
+        body = response["Body"]
+        length = int(response.get("ContentLength", 0))
+        return body, length
 
 
 class LocalStorage:

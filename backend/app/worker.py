@@ -214,6 +214,25 @@ def _import_result(
     _log(f"vídeo {video.id} ({video.organization_id}): {len(created)} evento(s)")
 
 
+def _publish_job_log(db: Session, job_id: str, job_log: Path) -> None:
+    """Copy the job log to object storage so any API replica can serve it.
+
+    Local storage keeps using the filesystem; only the remote backend needs a
+    shared copy, and doing it here removes the RWX volume requirement between
+    the worker and the API.
+    """
+    settings = _settings
+    if settings.storage_backend != "s3" or not job_log.exists():
+        return
+    job = db.get(Job, job_id)
+    if job is None or job.log_key:
+        return
+    key = settings.job_log_key(job.organization_id, job.id)
+    get_storage(settings).upload(job_log, key)
+    job.log_key = key
+    db.commit()
+
+
 def _process_job(job_id: str) -> None:
     global _current_process
     db = SessionLocal()
@@ -426,6 +445,14 @@ def _process_job(job_id: str) -> None:
             _current_process = None
         if downloaded_source is not None:
             downloaded_source.unlink(missing_ok=True)
+        try:
+            _publish_job_log(db, job_id, job_log)
+        except Exception as exc:  # noqa: BLE001 - never break the worker loop
+            _log(f"job {job_id}: falha ao publicar log: {exc}")
+            try:
+                db.rollback()
+            except Exception:  # noqa: BLE001 - connection may already be gone
+                pass
         db.close()
 
 

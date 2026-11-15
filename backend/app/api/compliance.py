@@ -31,7 +31,7 @@ from ..schemas import (
     PrivacySettingsOut,
     PublicPrivacyOut,
 )
-from ..security import ensure_utc, login_limiter
+from ..security import ensure_utc, limiter_for
 from ..services.organizations import generate_protocol
 from ..services.retention import run_retention
 from ..storage import get_storage
@@ -84,9 +84,10 @@ def create_data_subject_request(
         raise HTTPException(status_code=404, detail="organização não encontrada")
     ip = client_ip(request) or "unknown"
     key = f"dsr:{ip}"
-    if login_limiter.blocked(key, attempts=5, window_s=3600):
+    limiter = limiter_for(get_settings())
+    if limiter.blocked(db, key, attempts=5, window_s=3600):
         raise HTTPException(status_code=429, detail="muitas solicitações; tente mais tarde")
-    login_limiter.hit(key, window_s=3600)
+    limiter.hit(db, key, window_s=3600)
     if payload.date_range_start and payload.date_range_end:
         if payload.date_range_start > payload.date_range_end:
             raise HTTPException(status_code=422, detail="intervalo de datas inválido")

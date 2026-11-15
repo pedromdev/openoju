@@ -124,9 +124,18 @@ app.include_router(compliance.router, prefix="/api/v1")
 @app.get("/api/health", response_model=HealthOut, tags=["health"])
 @app.get("/api/v1/health", response_model=HealthOut, tags=["health"])
 def health() -> HealthOut:
-    free, total = disk_usage(settings.media_root)
+    try:
+        settings.media_root.mkdir(parents=True, exist_ok=True)
+        free, total = disk_usage(settings.media_root)
+        status = "ok"
+    except OSError as exc:
+        # A read-only or missing scratch volume must not turn into a restart
+        # loop; report it so the orchestrator can surface a degraded probe.
+        logger.warning("media root indisponível: %s", exc)
+        free, total = 0, 0
+        status = "degraded"
     return HealthOut(
-        status="ok",
+        status=status,
         media_root=str(settings.media_root),
         data_dir=str(settings.data_dir),
         media_free_bytes=free,

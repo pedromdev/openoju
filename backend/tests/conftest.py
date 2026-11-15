@@ -74,6 +74,7 @@ def client():
 
 @pytest.fixture(autouse=True)
 def reset_database():
+    from app import models  # noqa: F401 - ensure every table is registered
     from app.db import Base, engine
     from app.security import login_limiter
 

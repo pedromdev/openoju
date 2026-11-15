@@ -70,7 +70,9 @@ class Settings(BaseSettings):
     fernet_key: str = ""
     public_base_url: str = "http://localhost:8000"
 
-    # Login rate limiting (in-process; document single-replica limitation)
+    # Login rate limiting. "memory" is fine for a single API process;
+    # "postgres" shares the window across replicas.
+    rate_limit_backend: str = "memory"
     login_rate_limit_attempts: int = 10
     login_rate_limit_window_s: int = 300
 
@@ -84,6 +86,9 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     s3_part_size: int = 16 * 1024 * 1024
     s3_presign_expires_s: int = 86400
+    # Managed buckets are usually pre-created by IaC without CreateBucket
+    # permission; keep this off there.
+    s3_create_bucket: bool = True
 
     # OIDC (phase 4). Kept here so setup status can advertise availability.
     oidc_enabled: bool = False
@@ -172,6 +177,9 @@ class Settings(BaseSettings):
 
     def storage_key(self, organization_id: str, kind: str, name: str) -> str:
         return f"org/{organization_id}/{kind}/{name}"
+
+    def job_log_key(self, organization_id: str, job_id: str) -> str:
+        return f"org/{organization_id}/logs/{job_id}.log"
 
     def ensure_dirs(self) -> None:
         for path in (
