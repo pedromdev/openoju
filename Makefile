@@ -1,8 +1,11 @@
 SHELL := /bin/bash
 PY := .venv/bin/python
 PIP := .venv/bin/pip
+ENV ?= dev
+HELM ?= helm
 
-.PHONY: install api worker ui test sample build-ui docker-build docker-up docker-down docker-logs migrate revision
+.PHONY: install api worker ui test sample build-ui docker-build docker-up docker-down docker-logs migrate revision \
+	provision-init provision-doctor provision-plan provision-apply helm-lint helm-template test-provision
 
 install:
 	python3 -m venv .venv
@@ -28,6 +31,9 @@ ui:
 test:
 	PYTHONPATH=backend $(PY) -m pytest backend/tests -q
 
+test-provision:
+	$(PY) -m pytest scripts/tests -q
+
 sample:
 	./scripts/make_sample.sh
 
@@ -45,3 +51,22 @@ docker-down:
 
 docker-logs:
 	docker compose logs -f --tail=100
+
+# Provisionamento em Kubernetes (local, on-prem ou nuvem)
+provision-init:
+	$(PY) scripts/provision.py init --env $(ENV)
+
+provision-doctor:
+	$(PY) scripts/provision.py doctor --env $(ENV)
+
+provision-plan:
+	$(PY) scripts/provision.py plan --env $(ENV)
+
+provision-apply:
+	$(PY) scripts/provision.py apply --env $(ENV)
+
+helm-lint:
+	$(HELM) lint deploy/helm/openoju
+
+helm-template:
+	$(HELM) template openoju deploy/helm/openoju -f deploy/helm/openoju/values-minimal.yaml

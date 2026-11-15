@@ -1,5 +1,10 @@
 # Exposição pública (reverse proxy + Cloudflare Tunnel)
 
+> Este guia cobre o caminho legado de **docker compose atrás de proxy**. Para
+> provisionamento em Kubernetes (nuvem ou on-premise) use
+> [`docs/provisioning/`](provisioning/README.md) e o wizard
+> `scripts/provision.py`.
+
 ## Resultado esperado
 
 - URL pública: `https://openoju.example.com`

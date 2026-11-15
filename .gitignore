@@ -11,3 +11,4 @@ frontend/.angular/
 *.log
 
 docker-compose.override.yml
+deploy/environments/
