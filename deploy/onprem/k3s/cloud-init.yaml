@@ -1,0 +1,58 @@
+#cloud-config
+# Bootstrap de um nó k3s para o OpenOju.
+#
+# Uso: cole este arquivo no campo "user data" da sua VPS (Hetzner, DO, Vultr,
+# Magalu, Proxmox...) ou rode com cloud-localds em laboratório.
+#
+# Troque METALLB_RANGE pelo range livre da sua rede antes de usar.
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - ca-certificates
+  - jq
+  - ufw
+  - postgresql-client
+
+write_files:
+  - path: /etc/openoju/metallb-pool.yaml
+    permissions: "0644"
+    content: |
+      apiVersion: metallb.io/v1beta1
+      kind: IPAddressPool
+      metadata:
+        name: openoju
+        namespace: metallb-system
+      spec:
+        addresses:
+          - METALLB_RANGE
+  - path: /etc/openoju/README.txt
+    permissions: "0644"
+    content: |
+      k3s instalado. Próximos passos:
+        1. kubectl apply -f /etc/openoju/metallb-pool.yaml
+        2. python3 scripts/provision.py init --env onprem --target onprem
+        3. python3 scripts/provision.py apply --env onprem
+
+runcmd:
+  - mkdir -p /srv/openoju /srv/openoju/import
+  - chown -R 1000:1000 /srv/openoju
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 6443/tcp
+  - ufw --force enable
+  - curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server --write-kubeconfig-mode 644 --disable traefik" sh -
+  - mkdir -p /home/ubuntu/.kube && cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config || true
+  - chown -R ubuntu:ubuntu /home/ubuntu/.kube || true
+  - kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-native.yaml
+  - kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb --timeout=300s
+  - kubectl apply -f /etc/openoju/metallb-pool.yaml
+  - helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+  - helm repo add jetstack https://charts.jetstack.io
+  - helm repo update
+  - helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx --create-namespace
+  - helm upgrade --install cert-manager jetstack/cert-manager -n cert-manager --create-namespace --set crds.enabled=true
+
+final_message: "OpenOju: k3s pronto em $UPTIME segundos."

@@ -15,12 +15,13 @@ O arquivo `deploy/onprem/k3s/cloud-init.yaml` instala k3s, MetalLB,
 ingress-nginx, cert-manager e cria `/srv/openoju`. Ajuste o IP do MetalLB antes
 de usar.
 
-```bash
-terraform -chdir=deploy/terraform/stacks/onprem init
-terraform -chdir=deploy/terraform/stacks/onprem apply
+Use o arquivo como *user data* da VPS:
+
+```text
+deploy/onprem/k3s/cloud-init.yaml
 ```
 
-Sem Terraform, instale manualmente:
+Ou instale manualmente:
 
 ```bash
 curl -sfL https://get.k3s.io | sh -s - server \

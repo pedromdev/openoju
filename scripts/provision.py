@@ -21,6 +21,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -49,7 +50,7 @@ TARGETS: dict[str, dict[str, object]] = {
     },
     "onprem": {
         "label": "Kubernetes on-premise (k3s/RKE2/Talos/kubeadm)",
-        "terraform": "onprem",
+        "terraform": None,
         "cloud": False,
         "managed_db": False,
         "managed_storage": False,
@@ -720,8 +721,14 @@ def which(binary: str) -> str | None:
     return shutil.which(binary)
 
 
+KUBECONFIG: Path | None = None
+
+
 def run(cmd: list[str], *, cwd: Path | None = None, capture: bool = False) -> str:
     print(f"$ {' '.join(cmd)}")
+    env = os.environ.copy()
+    if KUBECONFIG is not None:
+        env["KUBECONFIG"] = str(KUBECONFIG)
     try:
         result = subprocess.run(
             cmd,
@@ -729,6 +736,7 @@ def run(cmd: list[str], *, cwd: Path | None = None, capture: bool = False) -> st
             text=True,
             capture_output=capture,
             check=True,
+            env=env,
         )
     except FileNotFoundError as exc:
         raise ProvisionError(f"binário não encontrado: {cmd[0]}") from exc
@@ -910,6 +918,30 @@ def action_apply(args: argparse.Namespace) -> int:
         annotations = outputs.get("service_account_annotations", {}).get("value")
         if annotations:
             values.setdefault("serviceAccount", {})["annotations"] = annotations
+        for output_key, secret_key in (
+            ("s3_access_key", "OJU_S3_ACCESS_KEY"),
+            ("s3_secret_key", "OJU_S3_SECRET_KEY"),
+        ):
+            value = outputs.get(output_key, {}).get("value")
+            if value:
+                secret_values[secret_key] = value
+        for output_key, config_key in (
+            ("s3_endpoint", "OJU_S3_ENDPOINT"),
+            ("s3_region", "OJU_S3_REGION"),
+        ):
+            value = outputs.get(output_key, {}).get("value")
+            if value:
+                values["config"][config_key] = value
+        kubeconfig_value = outputs.get("kubeconfig", {}).get("value")
+        if kubeconfig_value:
+            global KUBECONFIG
+            path = directory / "kubeconfig.yaml"
+            path.write_text(kubeconfig_value, encoding="utf-8")
+            path.chmod(0o600)
+            KUBECONFIG = path
+        command = outputs.get("kubeconfig_command", {}).get("value")
+        if command:
+            run(shlex.split(command))
         values_path.write_text(
             "# Gerado por scripts/provision.py a partir de answers.yaml.\n"
             + dump_yaml(values)

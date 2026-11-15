@@ -38,7 +38,7 @@ flowchart LR
 | Alvo | Terraform | Chart preset | Banco | Objeto | Observação |
 |---|---|---|---|---|---|
 | Local (kind/k3d) | — | `values-minimal.yaml` | embutido | embutido | validação e demo |
-| On-premise | `stacks/onprem` (opcional) | `values-onprem.yaml` | embutido | embutido | VAAPI disponível |
+| On-premise | — (cloud-init) | `values-onprem.yaml` | embutido | embutido | VAAPI disponível |
 | AWS | `stacks/aws` | `values-aws.yaml` | RDS | S3 + IRSA | ALB + ACM |
 | GCP | `stacks/gcp` | `values-gcp.yaml` | Cloud SQL | GCS interop | GCLB |
 | Azure | `stacks/azure` | `values-azure.yaml` | Flexible Server | MinIO | Blob não é S3 |

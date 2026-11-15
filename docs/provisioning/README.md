@@ -19,7 +19,7 @@ apenas para desenvolvimento local.
 | Alvo | Terraform | Ferramentas locais |
 |---|---|---|
 | Local | não | docker, kind, helm, kubectl |
-| On-premise | opcional | helm, kubectl, acesso ao cluster |
+| On-premise | não (cloud-init) | helm, kubectl, acesso ao cluster |
 | AWS | sim | terraform, aws, helm, kubectl |
 | GCP | sim | terraform, gcloud, helm, kubectl |
 | Azure | sim | terraform, az, helm, kubectl |

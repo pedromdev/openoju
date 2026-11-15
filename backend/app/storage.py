@@ -26,17 +26,20 @@ def _client(settings: Settings, *, public: bool):
     )
     if not endpoint:
         raise StorageError("endpoint S3 não configurado")
+    credentials = {}
+    if settings.s3_access_key and settings.s3_secret_key:
+        credentials["aws_access_key_id"] = settings.s3_access_key
+        credentials["aws_secret_access_key"] = settings.s3_secret_key
     return boto3.client(
         "s3",
         endpoint_url=endpoint,
-        aws_access_key_id=settings.s3_access_key,
-        aws_secret_access_key=settings.s3_secret_key,
         region_name=settings.s3_region,
         config=Config(
             signature_version="s3v4",
             s3={"addressing_style": "path"},
             retries={"max_attempts": 3, "mode": "standard"},
         ),
+        **credentials,
     )
 
 
