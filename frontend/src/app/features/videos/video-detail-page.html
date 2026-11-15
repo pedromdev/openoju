@@ -1,0 +1,343 @@
+<div class="mb-4">
+  <a
+    routerLink="/videos"
+    class="inline-flex items-center gap-2 text-sm text-slate-400 transition hover:text-white"
+  >
+    <span aria-hidden="true">←</span>
+    Voltar para vídeos
+  </a>
+</div>
+
+@if (loading()) {
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-10 text-center text-sm text-slate-400">
+    Carregando vídeo…
+  </div>
+} @else if (video(); as v) {
+  @if (error()) {
+    <div class="mb-4 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+      {{ error() }}
+    </div>
+  }
+
+  <header class="mb-5 flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <div class="flex flex-wrap items-center gap-2">
+        <h1 class="truncate text-2xl font-semibold tracking-tight text-white">{{ v.filename }}</h1>
+        <span
+          class="rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset"
+          [ngClass]="statusClasses(v)"
+        >
+          {{ statusLabel(v) }}
+        </span>
+      </div>
+      <p class="mt-2 text-xs text-slate-500">
+        {{ date(v.created_at) }} · {{ v.video_codec || '—' }}
+        @if (v.width && v.height) {
+          · {{ v.width }}×{{ v.height }}
+        }
+        @if (v.fps) {
+          · {{ v.fps }} fps
+        }
+        · {{ profileName(v.profile_id) }}
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      @if (isActive(v) && canCancelJobs()) {
+        <button
+          type="button"
+          class="rounded-xl border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-200 transition hover:border-rose-400 hover:text-white"
+          (click)="cancelAnalysis()"
+        >
+          Cancelar análise
+        </button>
+      }
+      <button
+        type="button"
+        class="rounded-xl border border-slate-700 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-emerald-500/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        [disabled]="isActive(v)"
+        (click)="analyzeAgain()"
+      >
+        {{ isActive(v) ? 'Processando…' : 'Reanalisar' }}
+      </button>
+      @if (canManage()) {
+        <button
+          type="button"
+          class="rounded-xl border border-rose-500/40 px-3 py-2 text-sm font-medium text-rose-200 transition hover:border-rose-400 hover:text-white"
+          (click)="requestDelete()"
+        >
+          Excluir
+        </button>
+      }
+    </div>
+  </header>
+
+  <div class="grid gap-4 lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]">
+    <section class="min-w-0">
+      @if (videoSrc(); as src) {
+        <video
+          #player
+          class="aspect-video w-full rounded-2xl border border-slate-800 bg-black shadow-2xl shadow-black/30"
+          [src]="src"
+          controls
+          preload="metadata"
+          (timeupdate)="onTimeUpdate($event)"
+        ></video>
+      } @else {
+        <div class="grid aspect-video w-full place-items-center rounded-2xl border border-slate-800 bg-slate-900/60">
+          <div class="text-center">
+            <p class="text-sm font-medium text-slate-300">Proxy ainda não disponível</p>
+            <p class="mt-1 text-xs text-slate-500">O player aparece quando a preparação terminar.</p>
+            @if (isActive(v)) {
+              <div class="mx-auto mt-4 w-56">
+                <div class="h-2 overflow-hidden rounded-full bg-slate-800">
+                  <div class="h-full rounded-full bg-emerald-400 transition-all" [style.width.%]="jobProgress(v)"></div>
+                </div>
+                <p class="mt-2 font-mono text-[11px] text-emerald-300">{{ jobProgress(v) }}%</p>
+              </div>
+            }
+          </div>
+        </div>
+      }
+
+      <div class="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Linha do tempo</p>
+            <p class="mt-1 text-xs text-slate-500">
+              {{ events().length }} evento{{ events().length === 1 ? '' : 's' }}
+              · {{ durationText(motionSeconds()) }} com movimentação
+            </p>
+          </div>
+          @if (currentEvent(); as active) {
+            <span class="rounded-full px-2.5 py-1 text-[11px] ring-1 ring-inset" [ngClass]="eventClasses(active)">
+              {{ rangeText(active) }}
+            </span>
+          }
+        </div>
+
+        <div class="relative h-16 overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
+          <div class="absolute inset-x-0 top-1/2 h-px bg-slate-800"></div>
+          @for (event of events(); track event.id) {
+            <button
+              type="button"
+              class="absolute top-3 bottom-3 rounded-md transition"
+              [ngClass]="segmentColor(event)"
+              [style.left.%]="timelineLeft(event)"
+              [style.width.%]="timelineWidth(event)"
+              [title]="rangeText(event)"
+              (click)="seekTo(event)"
+            ></button>
+          }
+          <div
+            class="pointer-events-none absolute bottom-0 top-0 w-px bg-white/80 shadow-[0_0_8px_rgba(255,255,255,0.45)]"
+            [style.left.%]="playheadLeft()"
+          ></div>
+        </div>
+        <div class="mt-2 flex justify-between font-mono text-[10px] text-slate-600">
+          <span>00:00</span>
+          <span>{{ durationText(duration() / 2) }}</span>
+          <span>{{ durationText(duration()) }}</span>
+        </div>
+      </div>
+    </section>
+
+    <aside class="space-y-4">
+      <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Resumo</p>
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <div class="rounded-xl bg-slate-950/60 p-3">
+            <p class="text-[11px] text-slate-500">Eventos</p>
+            <p class="mt-1 text-2xl font-semibold text-white">{{ events().length }}</p>
+          </div>
+          <div class="rounded-xl bg-slate-950/60 p-3">
+            <p class="text-[11px] text-slate-500">Movimento</p>
+            <p class="mt-1 text-2xl font-semibold text-white">{{ durationText(motionSeconds()) }}</p>
+          </div>
+          <div class="rounded-xl bg-slate-950/60 p-3">
+            <p class="text-[11px] text-slate-500">Duração</p>
+            <p class="mt-1 text-lg font-semibold text-slate-200">{{ durationText(duration()) }}</p>
+          </div>
+          <div class="rounded-xl bg-slate-950/60 p-3">
+            <p class="text-[11px] text-slate-500">FPS</p>
+            <p class="mt-1 text-lg font-semibold text-slate-200">{{ v.fps || '—' }}</p>
+          </div>
+        </div>
+
+        @if (isActive(v)) {
+          <div class="mt-4 rounded-xl border border-sky-500/20 bg-sky-500/10 p-3">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-sky-200">{{ v.job_stage || 'processando' }}</span>
+              <span class="font-mono text-sky-300">{{ jobProgress(v) }}%</span>
+            </div>
+            <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-sky-950">
+              <div class="h-full rounded-full bg-sky-400 transition-all" [style.width.%]="jobProgress(v)"></div>
+            </div>
+          </div>
+        }
+
+        @if (v.error) {
+          <p class="mt-4 rounded-xl border border-rose-500/20 bg-rose-500/10 p-3 text-xs leading-relaxed text-rose-200">
+            {{ v.error }}
+          </p>
+        }
+
+        <dl class="mt-4 space-y-2 border-t border-slate-800 pt-4 text-xs">
+          <div class="flex justify-between gap-3">
+            <dt class="text-slate-500">Arquivo</dt>
+            <dd class="max-w-[60%] truncate text-right text-slate-300" [title]="v.source_path">{{ v.filename }}</dd>
+          </div>
+          <div class="flex justify-between gap-3">
+            <dt class="text-slate-500">Profile</dt>
+            <dd class="text-right text-slate-300">{{ profileName(v.profile_id) }}</dd>
+          </div>
+          <div class="flex justify-between gap-3">
+            <dt class="text-slate-500">Áudio</dt>
+            <dd class="text-right text-slate-300">{{ v.audio_codec || 'sem áudio' }}</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Como revisar</p>
+        <p class="mt-2 text-xs leading-relaxed text-slate-400">
+          Clique em um evento para pular o player para o início. Confirme o que for
+          relevante e descarte ruído para manter o catálogo limpo.
+        </p>
+      </div>
+    </aside>
+  </div>
+
+  <section class="mt-8">
+    <div class="mb-3 flex items-end justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold text-white">Eventos detectados</h2>
+        <p class="mt-1 text-xs text-slate-500">Ordenados pelo tempo do vídeo.</p>
+      </div>
+    </div>
+
+    @if (events().length === 0) {
+      <div class="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-10 text-center">
+        <p class="text-sm font-medium text-slate-300">Nenhuma movimentação detectada.</p>
+        <p class="mt-1 text-xs text-slate-500">
+          Se a cena tinha movimento, ajuste o limiar ou a máscara no perfil da câmera.
+        </p>
+      </div>
+    } @else {
+      <div class="grid gap-3 xl:grid-cols-2">
+        @for (event of events(); track event.id; let i = $index) {
+          <article
+            class="rounded-2xl border bg-slate-900/70 p-3 transition"
+            [ngClass]="currentEvent()?.id === event.id ? 'border-emerald-500/50' : 'border-slate-800'"
+          >
+            <div class="flex gap-3">
+              <button
+                type="button"
+                class="relative aspect-video w-32 shrink-0 overflow-hidden rounded-xl border border-slate-800 bg-slate-950 sm:w-40"
+                (click)="seekTo(event)"
+              >
+                <img
+                  [src]="thumbnailUrl(event)"
+                  [alt]="'Evento ' + (i + 1)"
+                  class="size-full object-cover"
+                  loading="lazy"
+                />
+                <span class="absolute left-2 top-2 rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-slate-200">
+                  {{ i + 1 }}
+                </span>
+              </button>
+
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <p class="font-mono text-sm font-medium text-white">{{ rangeText(event) }}</p>
+                  <span
+                    class="rounded-full px-2 py-0.5 text-[10px] ring-1 ring-inset"
+                    [ngClass]="eventClasses(event)"
+                  >
+                    {{ eventLabel(event) }}
+                  </span>
+                </div>
+                <p class="mt-1 text-[11px] text-slate-500">
+                  Duração {{ durationText(event.end_s - event.start_s) }}
+                  · score {{ scoreText(event.peak_score) }}
+                </p>
+                @if (event.start_wallclock) {
+                  <p class="mt-1 text-[11px] text-slate-500">{{ date(event.start_wallclock) }}</p>
+                }
+
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    class="rounded-lg bg-slate-800 px-2.5 py-1 text-[11px] font-medium text-slate-200 transition hover:bg-slate-700"
+                    (click)="seekTo(event)"
+                  >
+                    Reproduzir
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] font-medium text-slate-300 transition hover:border-slate-500"
+                    (click)="openClip(event)"
+                  >
+                    Clipe
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-lg bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/20 transition hover:bg-emerald-500/20"
+                    (click)="review(event, 'confirmed')"
+                  >
+                    Confirmar
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-lg bg-slate-800/60 px-2.5 py-1 text-[11px] font-medium text-slate-400 ring-1 ring-inset ring-slate-700 transition hover:text-slate-200"
+                    (click)="review(event, 'dismissed')"
+                  >
+                    Descartar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
+        }
+      </div>
+    }
+  </section>
+}
+
+@if (selectedClip(); as clip) {
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+    (click)="closeClip()"
+  >
+    <div
+      class="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl"
+      (click)="$event.stopPropagation()"
+    >
+      <div class="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-3">
+        <div>
+          <p class="text-sm font-medium text-white">Clipe do evento</p>
+          <p class="mt-0.5 font-mono text-[11px] text-slate-500">{{ rangeText(clip) }}</p>
+        </div>
+        <button
+          type="button"
+          class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-500 hover:text-white"
+          (click)="closeClip()"
+        >
+          Fechar
+        </button>
+      </div>
+      <video class="aspect-video w-full bg-black" [src]="clipUrl(clip)" controls autoplay></video>
+    </div>
+  </div>
+}
+
+<app-confirm-dialog
+  [open]="confirmDelete()"
+  title="Excluir vídeo?"
+  [message]="(video()?.filename ?? '') + '
+
+A mídia no storage e os artefatos locais serão removidos permanentemente. Se houver análise em andamento ou legal hold, a exclusão será bloqueada.'"
+  confirmLabel="Excluir"
+  [busy]="deleting()"
+  (confirmed)="deleteVideo()"
+  (cancelled)="cancelDelete()"
+/>

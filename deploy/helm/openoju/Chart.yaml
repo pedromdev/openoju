@@ -1,0 +1,6 @@
+apiVersion: v2
+name: openoju
+description: Self-hosted, open-source review of motion events from security cameras
+type: application
+version: 0.1.0
+appVersion: "0.3.0"

@@ -1,0 +1,313 @@
+<div class="space-y-6">
+  <header class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-semibold text-white">{{ i18n.t('nav.admin') }}</h1>
+      <p class="text-sm text-slate-400">
+        {{ auth.organization()?.name }} · {{ auth.me()?.user.email }}
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-1 rounded-xl border border-slate-800 bg-slate-900/60 p-1 text-xs">
+      @for (item of tabs; track item.key) {
+        <button
+          type="button"
+          class="rounded-lg px-3 py-1.5 transition"
+          [ngClass]="tab() === item.key ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-100'"
+          (click)="setTab(item.key)"
+        >
+          {{ i18n.t(item.label) }}
+        </button>
+      }
+    </div>
+  </header>
+
+  @if (error()) {
+    <p class="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">{{ error() }}</p>
+    <button class="text-xs text-slate-400 underline" type="button" (click)="error.set(null)">fechar</button>
+  }
+  @if (notice()) {
+    <p class="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">{{ notice() }}</p>
+  }
+
+  @switch (tab()) {
+    @case ('members') {
+      <section class="grid gap-4 lg:grid-cols-[1fr_360px]">
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/50">
+          <table class="w-full text-left text-sm">
+            <thead class="border-b border-slate-800 text-xs uppercase text-slate-500">
+              <tr><th class="px-4 py-3">E-mail</th><th class="px-4 py-3">Grupos</th><th class="px-4 py-3">Status</th><th class="px-4 py-3"></th></tr>
+            </thead>
+            <tbody>
+              @for (member of members(); track member.id) {
+                <tr class="border-b border-slate-800/60">
+                  <td class="px-4 py-3">
+                    <span class="block text-slate-100">{{ member.display_name || member.email }}</span>
+                    <span class="text-xs text-slate-500">{{ member.email }}</span>
+                  </td>
+                  <td class="px-4 py-3 text-slate-300">{{ groupNames(member) }}</td>
+                  <td class="px-4 py-3">
+                    <span class="rounded-full px-2 py-0.5 text-xs"
+                      [ngClass]="member.status === 'active' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'">
+                      {{ member.status }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    @if (can('members.manage')) {
+                      <button class="text-xs text-slate-400 hover:text-white" type="button"
+                        (click)="setMemberStatus(member, member.status === 'active' ? 'suspended' : 'active')">
+                        {{ member.status === 'active' ? 'Suspender' : 'Ativar' }}
+                      </button>
+                    }
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="4" class="px-4 py-6 text-center text-slate-500">Nenhum membro.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        @if (can('members.invite')) {
+          <form class="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-4" (ngSubmit)="invite()">
+            <h2 class="font-medium text-white">Convidar membro</h2>
+            <input class="input" type="email" placeholder="email@empresa.com" name="inviteEmail" [(ngModel)]="inviteEmail" required />
+            <select class="input" name="inviteGroup" [(ngModel)]="inviteGroupId">
+              <option value="">Viewer (padrão)</option>
+              @for (group of groups(); track group.id) {
+                <option [value]="group.id">{{ group.name }}</option>
+              }
+            </select>
+            <button class="btn" type="submit">Criar convite</button>
+            @if (inviteToken) {
+              <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+                <p class="font-medium">Token do convite (mostrado uma vez):</p>
+                <code class="mt-1 block break-all">{{ inviteToken }}</code>
+                <p class="mt-2 text-amber-200/80">Envie o link <code>/invite?token=...</code> para o membro.</p>
+              </div>
+            }
+          </form>
+        }
+      </section>
+    }
+
+    @case ('groups') {
+      <section class="grid gap-4 lg:grid-cols-[1fr_420px]">
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+          @for (group of groups(); track group.id) {
+            <button type="button" class="mb-2 flex w-full items-center justify-between rounded-xl border border-slate-800 px-4 py-3 text-left hover:border-emerald-500"
+              (click)="editGroup(group)">
+              <span>
+                <span class="block text-sm text-white">{{ group.name }}</span>
+                <span class="block text-xs text-slate-500">{{ group.permissions.length }} permissões</span>
+              </span>
+              @if (group.is_system) {
+                <span class="text-xs text-slate-500">sistema</span>
+              }
+            </button>
+          }
+        </div>
+        @if (can('groups.manage')) {
+          <form class="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-4" (ngSubmit)="saveGroup()">
+            <h2 class="font-medium text-white">{{ groupId ? 'Editar grupo' : 'Novo grupo' }}</h2>
+            <input class="input" placeholder="Nome" name="groupName" [(ngModel)]="groupName" required />
+            <input class="input" placeholder="Descrição" name="groupDescription" [(ngModel)]="groupDescription" />
+            <div class="max-h-64 overflow-auto rounded-xl border border-slate-800 p-2">
+              @for (permission of permissions; track permission) {
+                <label class="flex items-center gap-2 px-2 py-1 text-xs text-slate-300">
+                  <input type="checkbox" [checked]="groupPermissions.includes(permission)" (change)="toggleGroupPermission(permission)" />
+                  {{ permission }}
+                </label>
+              }
+            </div>
+            <div class="flex gap-2">
+              <button class="btn flex-1" type="submit">Salvar</button>
+              <button class="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300" type="button" (click)="resetGroup()">Limpar</button>
+            </div>
+          </form>
+        }
+      </section>
+    }
+
+    @case ('apiKeys') {
+      <section class="grid gap-4 lg:grid-cols-[1fr_360px]">
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+          @for (key of apiKeys(); track key.id) {
+            <div class="mb-2 flex items-center justify-between rounded-xl border border-slate-800 px-4 py-3">
+              <div>
+                <p class="text-sm text-white">{{ key.name }}</p>
+                <p class="text-xs text-slate-500">{{ key.prefix }} · {{ key.scopes.join(', ') }}</p>
+              </div>
+              @if (can('api_keys.manage') && !key.revoked_at) {
+                <button class="text-xs text-rose-300 hover:text-rose-200" type="button" (click)="revokeApiKey(key)">Revogar</button>
+              }
+            </div>
+          } @empty {
+            <p class="text-sm text-slate-500">Nenhuma API key.</p>
+          }
+        </div>
+        @if (can('api_keys.manage')) {
+          <form class="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-4" (ngSubmit)="createApiKey()">
+            <h2 class="font-medium text-white">Nova API key</h2>
+            <input class="input" placeholder="Nome" name="apiKeyName" [(ngModel)]="apiKeyName" required />
+            @for (scope of scopes; track scope) {
+              <label class="flex items-center gap-2 text-xs text-slate-300">
+                <input type="checkbox" [checked]="apiKeyScopes.includes(scope)" (change)="toggleScope(scope)" />
+                {{ scope }}
+              </label>
+            }
+            <button class="btn" type="submit">Criar</button>
+            @if (newApiKey) {
+              <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+                <p class="font-medium">Segredo (mostrado uma vez):</p>
+                <code class="mt-1 block break-all">{{ newApiKey }}</code>
+              </div>
+            }
+          </form>
+        }
+      </section>
+    }
+
+    @case ('webhooks') {
+      <section class="grid gap-4 lg:grid-cols-[1fr_380px]">
+        <div class="space-y-3">
+          @for (endpoint of webhooks(); track endpoint.id) {
+            <div class="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm text-white">{{ endpoint.name }}</p>
+                  <p class="break-all text-xs text-slate-500">{{ endpoint.url }}</p>
+                  <p class="text-xs text-slate-500">{{ endpoint.events.join(', ') || 'todos' }} · falhas {{ endpoint.failure_count }}</p>
+                </div>
+                <div class="flex gap-2 text-xs">
+                  <button class="text-emerald-300 hover:text-emerald-200" type="button" (click)="testWebhook(endpoint)">Testar</button>
+                  <button class="text-slate-300 hover:text-white" type="button" (click)="loadDeliveries(endpoint)">Entregas</button>
+                  <button class="text-rose-300 hover:text-rose-200" type="button" (click)="deleteWebhook(endpoint)">Excluir</button>
+                </div>
+              </div>
+              @if (deliveries()[endpoint.id]?.length) {
+                <div class="mt-3 max-h-56 overflow-auto rounded-xl border border-slate-800">
+                  @for (delivery of deliveries()[endpoint.id]; track delivery.id) {
+                    <div class="flex items-center justify-between border-b border-slate-800/60 px-3 py-2 text-xs">
+                      <span class="text-slate-300">{{ delivery.event_type }} · {{ delivery.status }} · {{ delivery.attempts }} tentativa(s)</span>
+                      <span class="flex items-center gap-2 text-slate-500">
+                        {{ delivery.response_status ?? '—' }}
+                        @if (delivery.status !== 'success') {
+                          <button class="text-emerald-300" type="button" (click)="retryDelivery(endpoint, delivery)">reenviar</button>
+                        }
+                      </span>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          } @empty {
+            <p class="text-sm text-slate-500">Nenhum webhook configurado.</p>
+          }
+        </div>
+        @if (can('webhooks.manage')) {
+          <form class="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-4" (ngSubmit)="createWebhook()">
+            <h2 class="font-medium text-white">Novo webhook</h2>
+            <input class="input" placeholder="Nome" name="webhookName" [(ngModel)]="webhookName" required />
+            <input class="input" placeholder="https://..." name="webhookUrl" [(ngModel)]="webhookUrl" required />
+            @for (event of webhookEvents; track event) {
+              <label class="flex items-center gap-2 text-xs text-slate-300">
+                <input type="checkbox" [checked]="webhookEventsSelected.includes(event)" (change)="toggleWebhookEvent(event)" />
+                {{ event }}
+              </label>
+            }
+            <button class="btn" type="submit">Criar</button>
+            @if (newWebhookSecret) {
+              <div class="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-100">
+                <p class="font-medium">Segredo HMAC (mostrado uma vez):</p>
+                <code class="mt-1 block break-all">{{ newWebhookSecret }}</code>
+              </div>
+            }
+          </form>
+        }
+      </section>
+    }
+
+    @case ('privacy') {
+      @if (can('privacy.manage')) {
+        <form class="grid gap-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-5 lg:grid-cols-2" (ngSubmit)="savePrivacy()">
+          <label class="text-sm text-slate-300">Base legal
+            <input class="input mt-1" name="legalBasis" [(ngModel)]="privacyForm.legal_basis" />
+          </label>
+          <label class="text-sm text-slate-300">Retenção de mídia (dias)
+            <input class="input mt-1" type="number" name="mediaDays" [(ngModel)]="privacyForm.retention_media_days" />
+          </label>
+          <label class="text-sm text-slate-300">Metadados de eventos (meses)
+            <input class="input mt-1" type="number" name="eventMonths" [(ngModel)]="privacyForm.retention_event_months" />
+          </label>
+          <label class="text-sm text-slate-300">Access logs (meses)
+            <input class="input mt-1" type="number" name="accessMonths" [(ngModel)]="privacyForm.retention_access_logs_months" />
+          </label>
+          <label class="text-sm text-slate-300">Audit logs (meses)
+            <input class="input mt-1" type="number" name="auditMonths" [(ngModel)]="privacyForm.retention_audit_months" />
+          </label>
+          <label class="text-sm text-slate-300">DPO
+            <input class="input mt-1" name="dpoName" [(ngModel)]="privacyForm.dpo_name" />
+          </label>
+          <label class="text-sm text-slate-300">E-mail do DPO
+            <input class="input mt-1" type="email" name="dpoEmail" [(ngModel)]="privacyForm.dpo_email" />
+          </label>
+          <label class="text-sm text-slate-300">URL da política
+            <input class="input mt-1" name="policyUrl" [(ngModel)]="privacyForm.privacy_policy_url" />
+          </label>
+          <label class="text-sm text-slate-300 lg:col-span-2">Aviso de câmera
+            <textarea class="input mt-1 min-h-24" name="notice" [(ngModel)]="privacyForm.camera_notice_text"></textarea>
+          </label>
+          <div class="flex gap-2 lg:col-span-2">
+            <button class="btn" type="submit">Salvar</button>
+            <button class="rounded-xl border border-slate-700 px-4 py-2 text-sm text-slate-300" type="button" (click)="runRetention()">Executar retenção agora</button>
+          </div>
+          @if (retentionResult) {
+            <pre class="overflow-auto rounded-xl bg-slate-950 p-3 text-xs text-slate-300 lg:col-span-2">{{ retentionResult | json }}</pre>
+          }
+        </form>
+      }
+    }
+
+    @case ('dsr') {
+      <section class="rounded-2xl border border-slate-800 bg-slate-900/50">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-slate-800 text-xs uppercase text-slate-500">
+            <tr><th class="px-4 py-3">Protocolo</th><th class="px-4 py-3">Titular</th><th class="px-4 py-3">Tipo</th><th class="px-4 py-3">Prazo</th><th class="px-4 py-3">Status</th><th class="px-4 py-3"></th></tr>
+          </thead>
+          <tbody>
+            @for (request of dsr(); track request.id) {
+              <tr class="border-b border-slate-800/60">
+                <td class="px-4 py-3 text-slate-200">{{ request.protocol }}</td>
+                <td class="px-4 py-3"><span class="block text-slate-200">{{ request.requester_name }}</span><span class="text-xs text-slate-500">{{ request.requester_email }}</span></td>
+                <td class="px-4 py-3 text-slate-300">{{ request.type }}</td>
+                <td class="px-4 py-3 text-slate-300">{{ date(request.due_at) }}</td>
+                <td class="px-4 py-3">
+                  <select class="rounded-lg border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-200" [ngModel]="request.status" (ngModelChange)="setDsrStatus(request, $event)">
+                    @for (status of dsrStatuses; track status) { <option [value]="status">{{ status }}</option> }
+                  </select>
+                </td>
+                <td class="px-4 py-3 text-right text-xs">
+                  <button class="text-slate-300 hover:text-white" type="button" (click)="exportDsr(request)">exportar</button>
+                  <button class="ml-2 text-rose-300 hover:text-rose-200" type="button" (click)="executeDeletion(request)">excluir mídia</button>
+                </td>
+              </tr>
+            } @empty {
+              <tr><td colspan="6" class="px-4 py-6 text-center text-slate-500">Nenhuma solicitação.</td></tr>
+            }
+          </tbody>
+        </table>
+      </section>
+    }
+
+    @case ('audit') {
+      <section class="rounded-2xl border border-slate-800 bg-slate-900/50">
+        @for (log of audit(); track log.id) {
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/60 px-4 py-2 text-xs">
+            <span class="text-slate-200">{{ log.action }}</span>
+            <span class="text-slate-500">{{ log.resource_type }} {{ log.resource_id }} · {{ log.ip }} · {{ date(log.created_at) }}</span>
+          </div>
+        } @empty {
+          <p class="p-4 text-sm text-slate-500">Nenhum registro.</p>
+        }
+      </section>
+    }
+  }
+</div>

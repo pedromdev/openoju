@@ -1,0 +1,33 @@
+{{- if not .Values.data.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openoju.fullname" . }}-data
+  labels:
+    {{- include "openoju.labels" . | nindent 4 }}
+spec:
+  accessModes: ["{{ .Values.data.accessMode }}"]
+  {{- if .Values.data.storageClassName }}
+  storageClassName: {{ .Values.data.storageClassName }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.data.size }}
+{{- end }}
+{{- if not .Values.media.existingClaim }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "openoju.fullname" . }}-media
+  labels:
+    {{- include "openoju.labels" . | nindent 4 }}
+spec:
+  accessModes: ["{{ .Values.media.accessMode }}"]
+  {{- if .Values.media.storageClassName }}
+  storageClassName: {{ .Values.media.storageClassName }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.media.size }}
+{{- end }}

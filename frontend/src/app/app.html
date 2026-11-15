@@ -1,0 +1,69 @@
+<div class="min-h-screen bg-slate-950 text-slate-100">
+  <header class="sticky top-0 z-30 border-b border-slate-800/80 bg-slate-950/85 backdrop-blur">
+    <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <a routerLink="/videos" class="group flex items-center gap-3">
+        <span class="grid size-10 place-items-center rounded-2xl bg-emerald-500/10 ring-1 ring-emerald-500/25">
+          <svg viewBox="0 0 64 64" class="size-7" aria-hidden="true" focusable="false">
+            <path d="M46.98 31.21A15 15 0 1 1 32.79 17.02" fill="none" stroke="#34D399"
+              stroke-width="7" stroke-linecap="round" />
+            <circle cx="43.67" cy="20.33" r="4.4" fill="#FBBF24" />
+          </svg>
+        </span>
+        <span class="leading-tight">
+          <span class="block text-sm font-semibold tracking-wide text-white">OpenOju</span>
+          <span class="block text-xs text-slate-400">Análise de movimentação em vídeos</span>
+        </span>
+      </a>
+
+      <div class="flex flex-wrap items-center gap-2">
+        @if (auth.me()) {
+          <nav class="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900/60 p-1 text-sm">
+            <a routerLink="/videos" routerLinkActive="bg-slate-800 text-white shadow-sm"
+              class="rounded-lg px-3 py-1.5 text-slate-400 transition hover:text-slate-100">
+              {{ i18n.t('nav.videos') }}
+            </a>
+            <a routerLink="/profiles" routerLinkActive="bg-slate-800 text-white shadow-sm"
+              class="rounded-lg px-3 py-1.5 text-slate-400 transition hover:text-slate-100">
+              {{ i18n.t('nav.profiles') }}
+            </a>
+            @if (canAdmin()) {
+              <a routerLink="/admin" routerLinkActive="bg-slate-800 text-white shadow-sm"
+                class="rounded-lg px-3 py-1.5 text-slate-400 transition hover:text-slate-100">
+                {{ i18n.t('nav.admin') }}
+              </a>
+            }
+          </nav>
+
+          @if (organizations().length > 1) {
+            <select
+              class="rounded-xl border border-slate-800 bg-slate-900/60 px-2 py-1.5 text-sm text-slate-200"
+              [value]="auth.organization()?.slug ?? ''"
+              (change)="switchOrg($any($event.target).value)">
+              @for (organization of organizations(); track organization.id) {
+                <option [value]="organization.slug">{{ organization.name }}</option>
+              }
+            </select>
+          } @else if (auth.organization(); as organization) {
+            <span class="rounded-xl border border-slate-800 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-300">
+              {{ organization.name }}
+            </span>
+          }
+
+          <button type="button" class="rounded-xl border border-slate-800 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-600"
+            (click)="logout()">
+            {{ i18n.t('nav.logout') }}
+          </button>
+        }
+
+        <button type="button" class="rounded-xl border border-slate-800 px-2.5 py-1.5 text-xs text-slate-300"
+          (click)="i18n.toggle()">
+          {{ i18n.label() }}
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:py-8">
+    <router-outlet />
+  </main>
+</div>

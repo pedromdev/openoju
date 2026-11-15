@@ -1,0 +1,371 @@
+<section class="mb-8 grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+  <div class="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 shadow-2xl shadow-black/20 sm:p-6">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <p class="text-xs font-medium uppercase tracking-[0.22em] text-emerald-400">Ingestão</p>
+        <h1 class="mt-2 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+          Análise de movimentação
+        </h1>
+        <p class="mt-2 max-w-xl text-sm leading-relaxed text-slate-400">
+          Envie um DAV ou importe direto do SSD. O worker gera o proxy, analisa os frames
+          e devolve os trechos com movimentação para revisão.
+        </p>
+      </div>
+      <div class="rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-right">
+        <p class="text-[11px] uppercase tracking-wide text-slate-500">Perfil de análise</p>
+        <select
+          class="mt-1 max-w-44 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-200 outline-none focus:border-emerald-500"
+          [value]="selectedProfile()"
+          (change)="selectProfile($any($event.target).value)"
+        >
+          @for (profile of profiles(); track profile.id) {
+            <option [value]="profile.id">{{ profile.name }}</option>
+          }
+        </select>
+      </div>
+    </div>
+
+    @if (error()) {
+      <div class="mt-5 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+        {{ error() }}
+      </div>
+    }
+
+    <label
+      for="video-file"
+      class="mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed px-6 py-10 text-center transition"
+      [ngClass]="
+        dragActive()
+          ? 'border-emerald-400 bg-emerald-500/10'
+          : 'border-slate-700 bg-slate-950/40 hover:border-emerald-500/60 hover:bg-slate-900'
+      "
+      (dragover)="onDragOver($event)"
+      (dragleave)="onDragLeave($event)"
+      (drop)="onDrop($event)"
+    >
+      <span class="grid size-12 place-items-center rounded-2xl bg-emerald-500/10 text-emerald-300 ring-1 ring-emerald-500/20">
+        <svg viewBox="0 0 24 24" fill="none" class="size-6" stroke="currentColor" stroke-width="1.7">
+          <path d="M12 16V4m0 0L7 9m5-5 5 5" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" stroke-linecap="round" />
+        </svg>
+      </span>
+      <span class="mt-3 text-sm font-medium text-slate-200">
+        Arraste um ou mais vídeos ou clique para escolher
+      </span>
+      <span class="mt-1 text-xs text-slate-500">
+        Seleção múltipla · DAV, MP4, AVI, MKV, MOV, TS
+      </span>
+      <input
+        id="video-file"
+        type="file"
+        class="sr-only"
+        multiple
+        accept=".dav,.mp4,.avi,.mkv,.mov,.m4v,.ts,.mts,.m2ts,video/*"
+        (change)="onFileInput($event)"
+      />
+    </label>
+
+    @if (uploadProgress() !== null) {
+      <div class="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+        <div class="flex items-center justify-between gap-3 text-xs">
+          <span class="truncate text-slate-300">
+            @if (uploadTotal() > 1) {
+              <span class="mr-1 font-mono text-emerald-300">{{ uploadIndex() + 1 }}/{{ uploadTotal() }}</span>
+            }
+            {{ uploadName() }}
+          </span>
+          <span class="font-mono text-emerald-300">{{ uploadProgress() }}%</span>
+        </div>
+        <div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
+          <div
+            class="h-full rounded-full bg-emerald-400 transition-all"
+            [style.width.%]="uploadProgress()"
+          ></div>
+        </div>
+      </div>
+    }
+
+    <div class="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+      <input
+        type="text"
+        class="min-w-0 rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 outline-none focus:border-emerald-500"
+        placeholder="/srv/openoju/inbox"
+        [value]="importPath()"
+        (input)="importPath.set($any($event.target).value)"
+        (keydown.enter)="importPathNow()"
+      />
+      <button
+        type="button"
+        class="rounded-xl bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+        [disabled]="importing() || scanning() || uploading()"
+        (click)="importPathNow()"
+      >
+        {{ importing() ? 'Importando…' : 'Importar' }}
+      </button>
+      <button
+        type="button"
+        class="rounded-xl border border-slate-700 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-emerald-500/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+        [disabled]="importing() || scanning() || uploading()"
+        (click)="scanFolder()"
+      >
+        {{ scanning() ? 'Varrendo…' : 'Varrer pasta' }}
+      </button>
+    </div>
+    <p class="mt-2 text-[11px] text-slate-500">
+      A importação por caminho não copia o arquivo. A pasta padrão é
+      <code class="rounded bg-slate-800 px-1 py-0.5 text-slate-400">/srv/openoju/inbox</code>.
+      Qualquer pasta montada no container também pode ser importada.
+    </p>
+  </div>
+
+  <div class="grid grid-cols-2 gap-3">
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+      <p class="text-xs uppercase tracking-wide text-slate-500">Vídeos</p>
+      <p class="mt-2 text-3xl font-semibold text-white">{{ stats().total }}</p>
+      <p class="mt-1 text-xs text-slate-500">no catálogo</p>
+    </div>
+    <div class="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
+      <p class="text-xs uppercase tracking-wide text-emerald-300/70">Prontos</p>
+      <p class="mt-2 text-3xl font-semibold text-emerald-200">{{ stats().ready }}</p>
+      <p class="mt-1 text-xs text-emerald-300/60">com resultado</p>
+    </div>
+    <div class="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+      <p class="text-xs uppercase tracking-wide text-amber-300/70">Processando</p>
+      <p class="mt-2 text-3xl font-semibold text-amber-200">{{ stats().active }}</p>
+      <p class="mt-1 text-xs text-amber-300/60">na fila ou análise</p>
+    </div>
+    <div class="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
+      <p class="text-xs uppercase tracking-wide text-sky-300/70">Eventos</p>
+      <p class="mt-2 text-3xl font-semibold text-sky-200">{{ stats().events }}</p>
+      <p class="mt-1 text-xs text-sky-300/60">movimentações</p>
+    </div>
+  </div>
+</section>
+
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+  <div class="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900/60 p-1 text-xs">
+    <button
+      type="button"
+      class="rounded-lg px-3 py-1.5 transition"
+      [ngClass]="filter() === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'"
+      (click)="filter.set('all')"
+    >
+      Todos
+    </button>
+    <button
+      type="button"
+      class="rounded-lg px-3 py-1.5 transition"
+      [ngClass]="filter() === 'ready' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'"
+      (click)="filter.set('ready')"
+    >
+      Prontos
+    </button>
+    <button
+      type="button"
+      class="rounded-lg px-3 py-1.5 transition"
+      [ngClass]="filter() === 'active' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'"
+      (click)="filter.set('active')"
+    >
+      Processando
+    </button>
+    <button
+      type="button"
+      class="rounded-lg px-3 py-1.5 transition"
+      [ngClass]="filter() === 'failed' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'"
+      (click)="filter.set('failed')"
+    >
+      Falhas
+    </button>
+  </div>
+  <div class="flex items-center gap-2">
+    @if (canManage() && filteredVideos().length) {
+      <button
+        type="button"
+        class="rounded-lg border border-slate-700 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-500 hover:text-white"
+        (click)="selectAllVisible()"
+      >
+        Selecionar visíveis
+      </button>
+    }
+    <p class="text-xs text-slate-500">
+      Atualização automática a cada 3 s enquanto houver jobs ativos.
+    </p>
+  </div>
+</div>
+
+@if (selectedCount() > 0) {
+  <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm">
+    <span class="text-emerald-100">{{ selectedCount() }} selecionado(s)</span>
+    <div class="flex gap-2">
+      <button
+        type="button"
+        class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:text-white"
+        (click)="clearSelection()"
+      >
+        Limpar
+      </button>
+      @if (canManage()) {
+        <button
+          type="button"
+          class="rounded-lg bg-rose-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-rose-400"
+          (click)="requestBulkDelete()"
+        >
+          Excluir selecionados
+        </button>
+      }
+    </div>
+  </div>
+}
+
+@if (loading()) {
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-10 text-center text-sm text-slate-400">
+    Carregando catálogo…
+  </div>
+} @else if (filteredVideos().length === 0) {
+  <div class="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-12 text-center">
+    <p class="text-sm font-medium text-slate-300">Nenhum vídeo neste filtro.</p>
+    <p class="mt-1 text-xs text-slate-500">Envie um DAV ou importe uma pasta para começar.</p>
+  </div>
+} @else {
+  <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    @for (video of filteredVideos(); track video.id) {
+      <a
+        [routerLink]="['/videos', video.id]"
+        class="group overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 transition hover:-translate-y-0.5 hover:border-slate-600 hover:shadow-xl hover:shadow-black/20"
+      >
+        <div class="relative aspect-video overflow-hidden bg-slate-950">
+          @if (canManage()) {
+            <label
+              class="absolute right-3 top-3 z-10 grid size-7 cursor-pointer place-items-center rounded-lg border border-slate-600 bg-slate-950/80 text-slate-200 backdrop-blur"
+              (click)="$event.preventDefault(); $event.stopPropagation()"
+              [attr.aria-label]="'Selecionar ' + video.filename"
+            >
+              <input
+                type="checkbox"
+                class="size-4 accent-emerald-500"
+                [checked]="isSelected(video)"
+                (change)="toggleSelection(video)"
+                (click)="$event.stopPropagation()"
+              />
+            </label>
+          }
+          @if (video.thumbnail_path) {
+            <img
+              [src]="thumbnailUrl(video)"
+              [alt]="video.filename"
+              class="size-full object-cover transition duration-300 group-hover:scale-[1.02]"
+              loading="lazy"
+            />
+          } @else {
+            <div class="grid size-full place-items-center">
+              <div class="text-center">
+                <span class="mx-auto grid size-12 place-items-center rounded-2xl bg-slate-800/80 text-slate-500">
+                  <svg viewBox="0 0 24 24" fill="none" class="size-6" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3" y="5" width="18" height="14" rx="2" />
+                    <path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                <p class="mt-2 text-[11px] text-slate-500">Sem thumbnail</p>
+              </div>
+            </div>
+          }
+          <span
+            class="absolute left-3 top-3 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset"
+            [ngClass]="statusClasses(video)"
+          >
+            {{ statusLabel(video) }}
+          </span>
+          @if (video.duration_s) {
+            <span class="absolute bottom-3 right-3 rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-[11px] text-slate-200">
+              {{ duration(video.duration_s) }}
+            </span>
+          }
+          @if (isActive(video)) {
+            <div class="absolute inset-x-0 bottom-0 h-1 bg-slate-800">
+              <div class="h-full bg-emerald-400 transition-all" [style.width.%]="progress(video)"></div>
+            </div>
+          }
+        </div>
+
+        <div class="p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold text-white">{{ video.filename }}</p>
+              <p class="mt-1 truncate text-[11px] text-slate-500">
+                {{ date(video.created_at) }} · {{ video.video_codec || '—' }}
+                @if (video.width && video.height) {
+                  · {{ video.width }}×{{ video.height }}
+                }
+                · {{ bytes(video.size_bytes) }}
+              </p>
+            </div>
+            <span class="shrink-0 rounded-lg bg-slate-800 px-2 py-1 text-[11px] font-medium text-slate-300">
+              {{ video.event_count }} evento{{ video.event_count === 1 ? '' : 's' }}
+            </span>
+          </div>
+
+          <div class="mt-3 flex items-center justify-between gap-3">
+            <span class="truncate text-[11px] text-slate-500">
+              {{ profileName(video.profile_id) }}
+            </span>
+            @if (isActive(video)) {
+              <div class="flex shrink-0 items-center gap-2">
+                <span class="font-mono text-[11px] text-emerald-300">
+                  {{ progress(video) }}%
+                </span>
+                @if (canCancelJobs()) {
+                  <button
+                    type="button"
+                    class="rounded-lg border border-rose-500/40 px-2.5 py-1 text-[11px] font-medium text-rose-200 transition hover:border-rose-400 hover:text-white"
+                    (click)="cancelAnalysis(video, $event)"
+                  >
+                    Cancelar
+                  </button>
+                }
+              </div>
+            } @else {
+              <div class="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  class="rounded-lg border border-slate-700 px-2.5 py-1 text-[11px] font-medium text-slate-300 transition hover:border-emerald-500/60 hover:text-white"
+                  (click)="analyze(video); $event.preventDefault(); $event.stopPropagation()"
+                >
+                  Reanalisar
+                </button>
+                @if (canManage()) {
+                  <button
+                    type="button"
+                    class="rounded-lg border border-rose-500/30 px-2.5 py-1 text-[11px] font-medium text-rose-200 transition hover:border-rose-400 hover:text-white"
+                    (click)="requestDelete(video, $event)"
+                  >
+                    Excluir
+                  </button>
+                }
+              </div>
+            }
+          </div>
+
+          @if (video.error) {
+            <p class="mt-2 line-clamp-2 text-[11px] text-rose-300/80">{{ video.error }}</p>
+          }
+        </div>
+      </a>
+    }
+  </div>
+}
+
+<app-confirm-dialog
+  [open]="deleteTargets().length > 0"
+  title="Excluir vídeo(s)?"
+  [message]="deleteMessage()"
+  confirmLabel="Excluir"
+  [busy]="deleting()"
+  (confirmed)="confirmDelete()"
+  (cancelled)="cancelDelete()"
+/>
+
+@if (toast()) {
+  <div class="fixed bottom-5 right-5 z-50 max-w-sm rounded-2xl border border-emerald-500/30 bg-slate-900 px-4 py-3 text-sm text-emerald-100 shadow-2xl shadow-black/40">
+    {{ toast() }}
+  </div>
+}

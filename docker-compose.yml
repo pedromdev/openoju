@@ -1,0 +1,149 @@
+x-media-mount: &media-mount
+  type: bind
+  source: ${OJU_MEDIA_HOST_DIR:-/srv/openoju}
+  target: ${OJU_MEDIA_HOST_DIR:-/srv/openoju}
+  bind:
+    create_host_path: false
+
+x-import-mount: &import-mount
+  type: bind
+  source: ${OJU_IMPORT_HOST_DIR:-/srv/openoju/import}
+  target: ${OJU_IMPORT_HOST_DIR:-/srv/openoju/import}
+  read_only: true
+  bind:
+    create_host_path: false
+
+services:
+  minio:
+    image: bitnamilegacy/minio:latest
+    container_name: openoju-minio
+    restart: unless-stopped
+    user: "1000:1000"
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${OJU_S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${OJU_S3_SECRET_KEY}
+      MINIO_SERVER_URL: ${OJU_S3_ENDPOINT}
+      MINIO_BROWSER: "off"
+    volumes:
+      - type: bind
+        source: ${OJU_MEDIA_HOST_DIR:-/srv/openoju}/minio
+        target: /data
+        bind:
+          create_host_path: true
+    networks:
+      - proxy
+      - internal
+    stop_grace_period: 30s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: openoju:local
+    container_name: openoju-api
+    restart: unless-stopped
+    command:
+      - sh
+      - -c
+      - alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000
+    env_file:
+      - .env
+    environment:
+      OJU_DATA_DIR: /app/data
+      OJU_MEDIA_ROOT: ${OJU_MEDIA_HOST_DIR:-/srv/openoju}
+      OJU_WATCH_DIR: ${OJU_MEDIA_HOST_DIR:-/srv/openoju}/inbox
+      OJU_ENABLE_VAAPI: "true"
+      OJU_VAAPI_DEVICE: /dev/dri/renderD128
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+      - *media-mount
+      - *import-mount
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "110"
+    networks:
+      - proxy
+      - internal
+    stop_grace_period: 30s
+
+  dispatcher:
+    image: openoju:local
+    container_name: openoju-dispatcher
+    restart: unless-stopped
+    command: ["python", "-m", "app.dispatcher"]
+    env_file:
+      - .env
+    environment:
+      OJU_DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+
+  maintenance:
+    image: openoju:local
+    container_name: openoju-maintenance
+    restart: unless-stopped
+    command: ["python", "-m", "app.maintenance"]
+    env_file:
+      - .env
+    environment:
+      OJU_DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data
+      - *media-mount
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+
+  worker:
+    image: openoju:local
+    container_name: openoju-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - .env
+    environment:
+      OJU_DATA_DIR: /app/data
+      OJU_MEDIA_ROOT: ${OJU_MEDIA_HOST_DIR:-/srv/openoju}
+      OJU_WATCH_DIR: ${OJU_MEDIA_HOST_DIR:-/srv/openoju}/inbox
+      OJU_ENABLE_VAAPI: "true"
+      OJU_VAAPI_DEVICE: /dev/dri/renderD128
+    volumes:
+      - ./data:/app/data
+      - *media-mount
+      - *import-mount
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "110"
+    networks:
+      - internal
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s
+
+networks:
+  proxy:
+    external: true
+    name: ${OJU_PROXY_NETWORK:-proxy}
+  internal:
+    driver: bridge
