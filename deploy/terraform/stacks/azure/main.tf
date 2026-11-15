@@ -1,7 +1,7 @@
 locals {
   create_cluster = var.cluster_mode == "create"
   name           = "openoju-${var.environment}"
-  location       = var.location != "" ? var.location : var.region
+  location       = var.region
   ksa            = "${var.release_name}-openoju"
 }
 

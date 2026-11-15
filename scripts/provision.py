@@ -324,6 +324,9 @@ def default_answers(name: str, target: str) -> dict[str, str]:
             "magalu": "br-se1",
         }.get(target, ""),
         "node_count": "2",
+        "gcp_project": "",
+        "azure_subscription": "",
+        "mgc_key_pair_id": "",
         "db_instance": {
             "aws": "db.t4g.medium",
             "gcp": "db-custom-2-4096",
@@ -383,6 +386,23 @@ def collect_answers(args: argparse.Namespace, prompter: Prompter) -> dict[str, s
         base["region"] = prompter.ask("Região", base["region"])
         base["node_count"] = prompter.ask("Nós do pool de aplicação", base["node_count"])
         base["db_instance"] = prompter.ask("Classe da instância do banco", base["db_instance"])
+        if target == "gcp":
+            base["gcp_project"] = prompter.ask(
+                "Projeto GCP (project_id)", base.get("gcp_project") or ""
+            )
+        if target == "azure":
+            base["azure_subscription"] = prompter.ask(
+                "Subscription do Azure (ID)", base.get("azure_subscription") or ""
+            )
+        if target == "magalu":
+            base["mgc_key_pair_id"] = prompter.ask(
+                "Object Storage key pair ID (access key)",
+                base.get("mgc_key_pair_id") or "",
+            )
+    if target == "gcp" and getattr(args, "gcp_project", None):
+        base["gcp_project"] = args.gcp_project
+    if target == "azure" and getattr(args, "azure_subscription", None):
+        base["azure_subscription"] = args.azure_subscription
     base["features"] = "provisioning"
     return base
 
@@ -538,6 +558,14 @@ def tfvars_for(answers: dict[str, str]) -> dict:
     }
     if target == "azure":
         data["create_bucket"] = False
+        if answers.get("azure_subscription"):
+            data["subscription_id"] = answers["azure_subscription"]
+    if target == "gcp" and answers.get("gcp_project"):
+        data["project_id"] = answers["gcp_project"]
+    if target == "magalu":
+        # Só o ID público; o secret e a API key vêm de TF_VAR_* no ambiente.
+        if answers.get("mgc_key_pair_id"):
+            data["mgc_key_pair_id"] = answers["mgc_key_pair_id"]
     return data
 
 
@@ -725,8 +753,15 @@ def which(binary: str) -> str | None:
 KUBECONFIG: Path | None = None
 
 
-def run(cmd: list[str], *, cwd: Path | None = None, capture: bool = False) -> str:
-    print(f"$ {' '.join(cmd)}")
+def run(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    capture: bool = False,
+    quiet: bool = False,
+) -> str:
+    if not quiet:
+        print(f"$ {' '.join(cmd)}")
     env = os.environ.copy()
     if KUBECONFIG is not None:
         env["KUBECONFIG"] = str(KUBECONFIG)
@@ -744,6 +779,73 @@ def run(cmd: list[str], *, cwd: Path | None = None, capture: bool = False) -> st
     except subprocess.CalledProcessError as exc:
         raise ProvisionError(f"comando falhou ({exc.returncode}): {' '.join(cmd)}") from exc
     return result.stdout if capture else ""
+
+
+def check_credentials(answers: dict[str, str]) -> list[str]:
+    """Best-effort identity check. Never prints secrets."""
+    target = answers["target"]
+    problems: list[str] = []
+
+    if target == "aws" and which("aws"):
+        try:
+            account = run(
+                ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"],
+                capture=True,
+                quiet=True,
+            ).strip()
+            print(f"  aws: conta {account}")
+        except ProvisionError:
+            problems.append(
+                "aws sts get-caller-identity falhou; configure AWS_PROFILE/SSO "
+                "(veja docs/provisioning/credentials.md)"
+            )
+    elif target == "gcp" and which("gcloud"):
+        if not answers.get("gcp_project"):
+            problems.append("preencha gcp_project (project_id) no answers.yaml")
+        try:
+            account = run(
+                [
+                    "gcloud",
+                    "auth",
+                    "list",
+                    "--filter=status:ACTIVE",
+                    "--format=value(account)",
+                ],
+                capture=True,
+                quiet=True,
+            ).strip()
+            print(f"  gcp: conta {account or '<nenhuma>'}")
+            if not account:
+                problems.append("gcloud sem conta ativa; rode gcloud auth login")
+        except ProvisionError:
+            problems.append("gcloud falhou; rode gcloud auth login")
+    elif target == "azure" and which("az"):
+        if not answers.get("azure_subscription"):
+            problems.append("preencha azure_subscription (ID) no answers.yaml")
+        try:
+            subscription = run(
+                ["az", "account", "show", "--query", "id", "-o", "tsv"],
+                capture=True,
+                quiet=True,
+            ).strip()
+            print(f"  azure: subscription {subscription}")
+            if answers.get("azure_subscription") and subscription != answers["azure_subscription"]:
+                problems.append(
+                    "azure_subscription difere do az account show; rode az account set"
+                )
+        except ProvisionError:
+            problems.append("az account show falhou; rode az login")
+    elif target == "magalu":
+        if not os.environ.get("TF_VAR_mgc_api_key"):
+            problems.append(
+                "export TF_VAR_mgc_api_key=... (API key da Magalu Cloud)"
+            )
+        if answers.get("mgc_key_pair_id") and not os.environ.get(
+            "TF_VAR_mgc_key_pair_secret"
+        ):
+            problems.append("export TF_VAR_mgc_key_pair_secret=... (secret do key pair)")
+
+    return problems
 
 
 def doctor(answers: dict[str, str]) -> list[str]:
@@ -784,6 +886,10 @@ def doctor(answers: dict[str, str]) -> list[str]:
             problems.append(f"stack Terraform ausente: {stack.relative_to(ROOT)}")
         else:
             print(f"  stack Terraform: {stack.relative_to(ROOT)}")
+    print("\nCredenciais")
+    for problem in check_credentials(answers):
+        problems.append(problem)
+
     secrets_path = env_dir(answers["environment"]) / "secrets.env"
     if secrets_path.exists():
         mode = oct(secrets_path.stat().st_mode)[-3:]
@@ -802,6 +908,18 @@ def doctor(answers: dict[str, str]) -> list[str]:
 # ---------------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------------
+
+
+def required_identifiers(answers: dict[str, str]) -> list[str]:
+    target = answers["target"]
+    missing: list[str] = []
+    if target == "gcp" and not answers.get("gcp_project"):
+        missing.append("gcp_project (use --gcp-project ou answers.yaml)")
+    if target == "azure" and not answers.get("azure_subscription"):
+        missing.append("azure_subscription (use --azure-subscription ou answers.yaml)")
+    if target == "magalu" and not os.environ.get("TF_VAR_mgc_api_key"):
+        missing.append("TF_VAR_mgc_api_key no ambiente (API key da Magalu)")
+    return missing
 
 
 def load_answers(name: str) -> dict[str, str]:
@@ -827,6 +945,12 @@ def action_init(args: argparse.Namespace) -> int:
     answers = collect_answers(args, prompter)
     directory = render_environment(answers, force=True)
     print(f"\nambiente gerado em {directory.relative_to(ROOT)}")
+    missing = required_identifiers(answers)
+    if missing:
+        print("\naviso: faltam identificadores da nuvem:")
+        for item in missing:
+            print(f"  - {item}")
+        print("  edite answers.yaml e rode: provision.py render --env", args.env)
     print("segredos em secrets.env (600, gitignored)")
     print(f"próximo passo: python3 scripts/provision.py doctor --env {args.env}")
     return 0
@@ -1110,6 +1234,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--target", choices=list(TARGETS), help="alvo de provisionamento")
     p_init.add_argument("--answers", help="arquivo de respostas para modo não interativo")
     p_init.add_argument("--force", action="store_true", help="sobrescrever ambiente existente")
+    p_init.add_argument("--gcp-project", help="project_id do GCP (alvo gcp)")
+    p_init.add_argument(
+        "--azure-subscription", help="ID da subscription do Azure (alvo azure)"
+    )
     p_init.set_defaults(func=action_init)
 
     for name, func, help_text in (

@@ -24,6 +24,20 @@
 --verbose/-v         mais saída
 ```
 
+## Credenciais por nuvem
+
+O wizard não guarda segredo em `answers.yaml`. Ele espera as credenciais no
+ambiente:
+
+| Alvo | Variáveis |
+|---|---|
+| AWS | `AWS_PROFILE` ou `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` |
+| GCP | `GOOGLE_APPLICATION_CREDENTIALS` e `TF_VAR_project_id` |
+| Azure | `ARM_CLIENT_ID`, `ARM_CLIENT_SECRET`, `ARM_TENANT_ID`, `ARM_SUBSCRIPTION_ID` |
+| Magalu | `TF_VAR_mgc_api_key` e `TF_VAR_mgc_key_pair_id/secret` |
+
+Passo a passo em [`credentials.md`](credentials.md).
+
 ## Modo não interativo
 
 ```bash

@@ -156,3 +156,34 @@ def test_oidc_preset_maps_provider_to_issuer():
     assert values["config"]["OJU_OIDC_REDIRECT_URI"].endswith(
         "/api/v1/auth/oidc/callback"
     )
+
+
+def test_tfvars_maps_cloud_identifiers():
+    gcp = provision.default_answers("prod", "gcp")
+    gcp["gcp_project"] = "openoju-prod"
+    data = provision.tfvars_for(gcp)
+    assert data["project_id"] == "openoju-prod"
+
+    azure = provision.default_answers("prod", "azure")
+    azure["azure_subscription"] = "00000000-0000-0000-0000-000000000000"
+    data = provision.tfvars_for(azure)
+    assert data["subscription_id"] == azure["azure_subscription"]
+    assert data["create_bucket"] is False
+
+    magalu = provision.default_answers("prod", "magalu")
+    magalu["mgc_key_pair_id"] = "abc"
+    data = provision.tfvars_for(magalu)
+    assert data["mgc_key_pair_id"] == "abc"
+    assert "mgc_key_pair_secret" not in data
+    assert "mgc_api_key" not in data
+
+
+def test_answers_keep_provider_identifiers_but_no_secrets(env_root):
+    answers = provision.default_answers("prod", "gcp")
+    answers["gcp_project"] = "openoju-prod"
+    directory = provision.render_environment(answers)
+    tfvars = (directory / "terraform.tfvars").read_text(encoding="utf-8")
+    secrets = provision.read_env_file(directory / "secrets.env")
+    assert "project_id" in tfvars
+    for value in secrets.values():
+        assert value not in tfvars

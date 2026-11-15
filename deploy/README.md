@@ -65,6 +65,12 @@ state.json         alvo, versões e hash dos values
 runbook.md         sequência, DNS, checklist pós-apply
 ```
 
+## Credenciais
+
+`deploy/terraform/policies/` traz a política IAM da AWS e scripts que criam a
+service account do GCP e o service principal do Azure. O passo a passo está em
+[`docs/provisioning/credentials.md`](../docs/provisioning/credentials.md).
+
 ## Documentação por alvo
 
 - [Provisionamento local](provisioning/local.md)
