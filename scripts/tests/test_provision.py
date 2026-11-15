@@ -187,3 +187,15 @@ def test_answers_keep_provider_identifiers_but_no_secrets(env_root):
     assert "project_id" in tfvars
     for value in secrets.values():
         assert value not in tfvars
+
+
+def test_aws_managed_storage_does_not_generate_static_s3_keys():
+    answers = provision.default_answers("prod", "aws")
+    answers["storage"] = "managed"
+    secrets = provision.secrets_for(answers)
+    assert "OJU_S3_ACCESS_KEY" not in secrets
+    assert "OJU_S3_SECRET_KEY" not in secrets
+
+    bundled = provision.default_answers("dev", "local")
+    bundled_secrets = provision.secrets_for(bundled)
+    assert "OJU_S3_ACCESS_KEY" in bundled_secrets

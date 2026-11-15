@@ -42,7 +42,8 @@ system_node_count = 1
 node_count        = 1
 ```
 
-Total: 4 vCPUs, cabe na cota. Para produção, peça aumento
+Total: 4 vCPUs, cabe na cota. Com 1 nó `app` (2 vCPU), use também
+`worker_replicas: 1`; dois workers não cabem junto das duas réplicas de API. Para produção, peça aumento
 (`aws service-quotas request-service-quota-increase --service-code ec2 --quota-code L-1216C47A --desired-value 32`)
 ou use instâncias maiores.
 

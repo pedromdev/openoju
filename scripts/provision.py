@@ -329,6 +329,7 @@ def default_answers(name: str, target: str) -> dict[str, str]:
         "db_deletion_protection": "true",
         "bucket_force_destroy": "false",
         "system_node_count": "2",
+        "worker_replicas": "1",
         "image_repository": "",
         "image_tag": "",
         "mgc_key_pair_id": "",
@@ -433,7 +434,7 @@ def values_for(answers: dict[str, str]) -> dict:
         },
         "replicaCount": {
             "api": replicas,
-            "worker": max(1, replicas if spec["cloud"] else 1),
+            "worker": int(answers.get("worker_replicas") or 1),
             "dispatcher": 1,
             "maintenance": 1,
         },
@@ -588,9 +589,17 @@ def secrets_for(answers: dict[str, str], previous: dict[str, str] | None = None)
         "OJU_SECRET_KEY": previous.get("OJU_SECRET_KEY") or generate_secret_key(),
         "OJU_FERNET_KEY": previous.get("OJU_FERNET_KEY") or generate_fernet_key(),
         "OJU_SETUP_TOKEN": previous.get("OJU_SETUP_TOKEN") or generate_password(24),
-        "OJU_S3_ACCESS_KEY": previous.get("OJU_S3_ACCESS_KEY") or f"oju{secrets.token_hex(8)}",
-        "OJU_S3_SECRET_KEY": previous.get("OJU_S3_SECRET_KEY") or generate_password(32),
     }
+    # Na AWS o acesso ao S3 vem de IRSA: chaves estáticas no Secret fariam o
+    # boto3 ignorar a role do pod.
+    uses_irsa = answers["target"] == "aws" and answers["storage"] == "managed"
+    if not uses_irsa:
+        values["OJU_S3_ACCESS_KEY"] = (
+            previous.get("OJU_S3_ACCESS_KEY") or f"oju{secrets.token_hex(8)}"
+        )
+        values["OJU_S3_SECRET_KEY"] = (
+            previous.get("OJU_S3_SECRET_KEY") or generate_password(32)
+        )
     if answers["database"] == "bundled":
         values["postgres-password"] = previous.get("postgres-password") or generate_password(
             24
