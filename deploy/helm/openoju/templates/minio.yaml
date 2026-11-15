@@ -90,14 +90,17 @@ spec:
             {{- toYaml .Values.minio.resources | nindent 12 }}
       volumes:
         - name: data
-        {{- if .Values.minio.persistence.existingClaim }}
+        {{- if eq .Values.minio.persistence.mode "emptyDir" }}
+          emptyDir:
+            {{- toYaml .Values.minio.persistence.emptyDir | nindent 12 }}
+        {{- else if .Values.minio.persistence.existingClaim }}
           persistentVolumeClaim:
             claimName: {{ .Values.minio.persistence.existingClaim }}
         {{- else }}
           persistentVolumeClaim:
             claimName: {{ $name }}-minio
         {{- end }}
-{{- if not .Values.minio.persistence.existingClaim }}
+{{- if and (not .Values.minio.persistence.existingClaim) (eq .Values.minio.persistence.mode "pvc") }}
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

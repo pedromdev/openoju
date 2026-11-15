@@ -4,7 +4,7 @@ PIP := .venv/bin/pip
 ENV ?= dev
 HELM ?= helm
 
-.PHONY: install api worker ui test sample build-ui docker-build docker-up docker-down docker-logs migrate revision \
+.PHONY: install api worker ui test e2e sample build-ui docker-build docker-up docker-down docker-logs migrate revision \
 	provision-init provision-doctor provision-plan provision-apply helm-lint helm-template test-provision
 
 install:
@@ -53,6 +53,9 @@ docker-logs:
 	docker compose logs -f --tail=100
 
 # Provisionamento em Kubernetes (local, on-prem ou nuvem)
+e2e:
+	$(PY) scripts/e2e.py --token "$(TOKEN)" --video $(VIDEO)
+
 provision-init:
 	$(PY) scripts/provision.py init --env $(ENV)
 

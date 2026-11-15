@@ -96,8 +96,11 @@ vaapi:
 
 migrations:
   enabled: true
+  # Vazio cria uma ServiceAccount de hook (pre-install), porque a ServiceAccount
+  # do chart ainda não existe quando o hook roda.
+  serviceAccountName: ""
   annotations: {}
-  backoffLimit: 3
+  backoffLimit: 6
   activeDeadlineSeconds: 900
   resources:
     requests:
@@ -171,16 +174,21 @@ postgresql:
 # Requer OJU_S3_* no ConfigMap apontando para este Service e as chaves no Secret.
 minio:
   enabled: false
-  image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+  image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
   imagePullPolicy: IfNotPresent
-  command: ["server", "/data", "--console-address", ":9001"]
+  command: ["minio", "server", "/data", "--console-address", ":9001"]
   serviceName: ""
   accessKeyKey: OJU_S3_ACCESS_KEY
   secretKeyKey: OJU_S3_SECRET_KEY
   persistence:
+    # "pvc" para produção; "emptyDir" para CI/laboratório (efêmero).
+    mode: pvc
     size: 100Gi
     storageClassName: ""
     existingClaim: ""
+    emptyDir:
+      medium: Memory
+      sizeLimit: 2Gi
   resources:
     requests:
       cpu: 100m
@@ -191,7 +199,7 @@ minio:
   # Cria o bucket e aplica CORS na primeira instalação.
   initBucket:
     enabled: true
-    image: minio/mc:RELEASE.2025-04-08T15-42-25Z
+    image: pgsty/mc:RELEASE.2026-11-12T00-00-00Z
   # Expõe o MinIO em um host público: as URLs assinadas usam OJU_S3_ENDPOINT,
   # que precisa ser resolvível pelo navegador.
   public:

@@ -1,13 +1,36 @@
 {{- if .Values.migrations.enabled }}
-apiVersion: batch/v1
-kind: Job
+{{- $fullname := include "openoju.fullname" . }}
+{{- $serviceAccount := .Values.migrations.serviceAccountName | default (printf "%s-migrate" $fullname) }}
+{{- /*
+The hook cannot rely on chart resources: pre-install hooks run before the
+release is created, so the ConfigMap/ServiceAccount do not exist yet. Config is
+inlined here and the Secret is created out-of-band in production. When the chart
+generates the Secret itself (dev/minimal), migrations run post-install instead.
+*/}}
+{{- $hook := ternary "post-install,pre-upgrade" "pre-install,pre-upgrade" .Values.secrets.create }}
+{{- if not .Values.migrations.serviceAccountName }}
+apiVersion: v1
+kind: ServiceAccount
 metadata:
-  name: {{ include "openoju.fullname" . }}-migrate
+  name: {{ $serviceAccount }}
   labels:
     {{- include "openoju.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrations
   annotations:
     helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+---
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $fullname }}-migrate
+  labels:
+    {{- include "openoju.labels" . | nindent 4 }}
+    app.kubernetes.io/component: migrations
+  annotations:
+    helm.sh/hook: {{ $hook }}
     helm.sh/hook-weight: "-5"
     helm.sh/hook-delete-policy: before-hook-creation
     {{- with .Values.migrations.annotations }}
@@ -27,19 +50,41 @@ spec:
         {{- end }}
     spec:
       restartPolicy: Never
-      serviceAccountName: {{ include "openoju.serviceAccountName" . }}
+      serviceAccountName: {{ $serviceAccount }}
       {{- include "openoju.imagePullSecrets" . | nindent 6 }}
       securityContext:
         {{- include "openoju.podSecurityContext" . | nindent 8 }}
       containers:
         - name: migrate
-          securityContext:
-            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           image: "{{ include "openoju.image" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           command: ["alembic", "upgrade", "head"]
-          {{- include "openoju.env" . | nindent 10 }}
+          env:
+            {{- range $key, $value := .Values.config }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "openoju.secretName" . }}
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+            - name: media
+              mountPath: {{ .Values.config.OJU_MEDIA_ROOT | default "/media" }}
           resources:
             {{- toYaml .Values.migrations.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: media
+          emptyDir:
+            sizeLimit: 256Mi
       {{- include "openoju.scheduling" . | nindent 6 }}
 {{- end }}

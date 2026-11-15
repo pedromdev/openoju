@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..config import Settings, get_settings
 from ..models import Job, Video, new_id
+from ..storage import StorageError, get_storage
 from .ffmpeg import FfmpegError, probe_video
 from .jobs import enqueue_video, latest_job_for_video
 
@@ -165,13 +166,24 @@ async def save_upload(
         destination.unlink(missing_ok=True)
         raise
 
+    backend = settings.storage_backend
+    storage_key = settings.storage_key(organization_id, "videos", destination.name)
+    if backend == "s3":
+        # Upload straight to object storage so the worker can read the file from
+        # any node; the local copy is only scratch space.
+        try:
+            get_storage(settings).upload(destination, storage_key)
+        except StorageError:
+            destination.unlink(missing_ok=True)
+            raise
+
     video = Video(
         id=token,
         organization_id=organization_id,
         filename=original_name,
-        source_path=str(destination.resolve()),
-        storage_backend="local",
-        storage_key=settings.storage_key(organization_id, "videos", destination.name),
+        source_path=None if backend == "s3" else str(destination.resolve()),
+        storage_backend=backend,
+        storage_key=storage_key,
         sha256=checksum,
         size_bytes=destination.stat().st_size,
         duration_s=probe.duration_s,
@@ -187,6 +199,8 @@ async def save_upload(
     db.add(video)
     db.commit()
     db.refresh(video)
+    if backend == "s3":
+        destination.unlink(missing_ok=True)
 
     job: Job | None = None
     if settings.auto_analyze:

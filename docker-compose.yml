@@ -15,7 +15,9 @@ x-import-mount: &import-mount
 
 services:
   minio:
-    image: bitnamilegacy/minio:latest
+    # O MinIO parou de publicar no Docker Hub; o fork pgsty mantém a API S3
+    # e o CLI compatíveis, com tags multi-arquitetura.
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: openoju-minio
     restart: unless-stopped
     user: "1000:1000"

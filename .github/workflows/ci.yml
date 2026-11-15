@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
 
+env:
+  HELM_VERSION: v3.16.3
+  KUBECONFORM_VERSION: v0.6.7
+  TERRAFORM_VERSION: 1.17.2
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -23,6 +28,8 @@ jobs:
         env:
           PYTHONPATH: backend
         run: pytest backend/tests -q
+      - name: Run wizard tests
+        run: pytest scripts/tests -q
 
   frontend:
     runs-on: ubuntu-latest
@@ -39,6 +46,58 @@ jobs:
       - name: Build
         working-directory: frontend
         run: npm run build
+
+  chart:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        values:
+          - values-minimal.yaml
+          - values-onprem.yaml
+          - values-aws.yaml
+          - values-gcp.yaml
+          - values-azure.yaml
+          - values-magalu.yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install kubeconform
+        run: |
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar xz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+      - name: Lint
+        run: helm lint deploy/helm/openoju -f deploy/helm/openoju/${{ matrix.values }}
+      - name: Render and validate
+        run: |
+          helm template openoju deploy/helm/openoju \
+            -n openoju -f deploy/helm/openoju/${{ matrix.values }} > rendered.yaml
+          kubeconform -strict -summary -ignore-missing-schemas rendered.yaml
+
+  terraform:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [aws, gcp, azure, magalu]
+    defaults:
+      run:
+        working-directory: deploy/terraform/stacks/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - name: Format check
+        working-directory: deploy/terraform
+        run: terraform fmt -check -recursive -diff
+      - name: Init
+        run: terraform init -backend=false -input=false
+      - name: Validate
+        run: terraform validate -no-color
 
   image:
     runs-on: ubuntu-latest
@@ -71,3 +130,62 @@ jobs:
           path: .
           format: spdx-json
           artifact-name: openoju-sbom.spdx.json
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: openoju
+      - name: Build local image
+        run: docker build -t openoju:e2e .
+      - name: Load image into kind
+        run: kind load docker-image openoju:e2e --name openoju
+      - name: Install chart with bundled dependencies
+        run: |
+          helm upgrade --install openoju deploy/helm/openoju \
+            -n openoju --create-namespace \
+            -f deploy/helm/openoju/values-minimal.yaml \
+            --set image.repository=openoju \
+            --set image.tag=e2e \
+            --set replicaCount.api=2 \
+            --set config.OJU_RATE_LIMIT_BACKEND=postgres \
+            --set config.OJU_S3_INTERNAL_ENDPOINT=http://openoju-openoju-minio:9000 \
+            --set minio.persistence.mode=emptyDir \
+            --timeout 15m
+      - name: Wait for workloads
+        run: |
+          kubectl -n openoju rollout status deploy/openoju-openoju-api --timeout=600s
+          kubectl -n openoju rollout status deploy/openoju-openoju-worker --timeout=600s
+          kubectl -n openoju wait --for=condition=complete job/openoju-openoju-minio-init --timeout=300s
+      - name: Helm test
+        run: helm test openoju -n openoju --timeout=300s
+      - name: End-to-end flow
+        run: |
+          kubectl -n openoju port-forward svc/openoju-openoju 8000:8000 &
+          for _ in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health >/dev/null && break
+            sleep 2
+          done
+          TOKEN=$(kubectl -n openoju get secret openoju-secrets \
+            -o jsonpath='{.data.OJU_SETUP_TOKEN}' | base64 -d)
+          ./scripts/make_sample.sh /tmp/openoju/moving.mp4
+          python3 scripts/e2e.py \
+            --token "$TOKEN" \
+            --video /tmp/openoju/moving.mp4 \
+            --log-reads 6
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n openoju get pods -o wide
+          kubectl -n openoju describe pods | tail -200
+          kubectl -n openoju logs deploy/openoju-openoju-api --tail=200 || true
+          kubectl -n openoju logs deploy/openoju-openoju-worker --tail=200 || true

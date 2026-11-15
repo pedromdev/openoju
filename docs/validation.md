@@ -133,3 +133,24 @@ Feita em `https://openoju.example.com` com sessão real, em desktop
 - Erros de console observados são externos ou esperados: favicon do WhatsApp
   (extensão do navegador), Cloudflare Insights bloqueado pelo cliente e `401`
   em `/api/v1/auth/me` quando não há sessão.
+
+## Validação automatizada (E2E)
+
+`scripts/e2e.py` executa o caminho de primeira utilização contra qualquer
+instância: health, setup, login, upload multipart, análise, espera do job e
+leituras do log do job.
+
+```bash
+kubectl -n openoju port-forward svc/openoju-openoju 8000:8000 &
+TOKEN=$(kubectl -n openoju get secret openoju-secrets \
+  -o jsonpath='{.data.OJU_SETUP_TOKEN}' | base64 -d)
+./scripts/make_sample.sh /tmp/moving.mp4
+python3 scripts/e2e.py --token "$TOKEN" --video /tmp/moving.mp4 --log-reads 6
+```
+
+O CI roda esse fluxo em um cluster `kind` com 2 réplicas de API, Postgres,
+MinIO e `OJU_RATE_LIMIT_BACKEND=postgres`. É o teste que cobre as regressões de
+Kubernetes multi-nó: log de job fora do filesystem e rate limit compartilhado.
+
+Resultado local (kind, 2026-11-15): todas as etapas verdes, incluindo 6 leituras
+do log com a API em duas réplicas.

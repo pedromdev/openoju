@@ -47,15 +47,25 @@ uninstall` sem `--keep-history` remove o Secret.
 
 ## Migrations
 
-O chart roda `alembic upgrade head` em um Job com hook
-`pre-install,pre-upgrade`. A API **não** migra no start, então `replicaCount.api`
-pode passar de 1 sem corrida de migrations.
+O chart roda `alembic upgrade head` em um Job de hook. A API **não** migra no
+start, então `replicaCount.api` pode passar de 1 sem corrida de migrations.
+
+O hook é `pre-install,pre-upgrade` quando o Secret já existe (produção). Quando
+`secrets.create=true` (dev/minimal), o Secret é criado junto com o release, então
+o hook vira `post-install,pre-upgrade`; nesse caso a API sobe antes das
+migrations e fica em `CrashLoopBackOff` por alguns segundos até o Job concluir.
 
 Para desligar (por exemplo, quando as migrations rodam fora do Helm):
 
 ```bash
 --set migrations.enabled=false
 ```
+
+## MinIO embutido
+
+`minio.persistence.mode=emptyDir` usa um volume em memória (efêmero) e é o modo
+recomendado para CI e laboratório. Em produção use `pvc`, preferencialmente em um
+disco premium.
 
 ## Volumes
 

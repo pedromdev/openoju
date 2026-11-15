@@ -53,6 +53,11 @@ def test_dump_tfvars_types():
     assert 'list = ["a", "b"]' in rendered
 
 
+def test_wizard_never_generates_secret_in_chart():
+    local = provision.values_for(provision.default_answers("dev", "local"))
+    assert local["secrets"]["create"] is False
+
+
 def test_cloud_values_disable_generated_secret():
     answers = provision.default_answers("prod", "aws")
     answers["storage"] = "managed"

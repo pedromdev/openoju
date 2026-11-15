@@ -16,6 +16,9 @@ apenas para desenvolvimento local.
 
 ## Requisitos por alvo
 
+Terraform >= 1.11 é obrigatório: o provider da Magalu usa atributos
+*write-only* para usuário e senha do banco.
+
 | Alvo | Terraform | Ferramentas locais |
 |---|---|---|
 | Local | não | docker, kind, helm, kubectl |

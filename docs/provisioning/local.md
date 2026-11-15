@@ -19,6 +19,12 @@ python3 scripts/provision.py plan --env local
 O preset gerado usa Postgres e MinIO embutidos, `media.mode=emptyDir` e sem
 TLS. O endpoint S3 é `http://localhost:9000` e é alcançado por port-forward.
 
+Em CI ou máquina com pouco disco, use o MinIO efêmero em memória:
+
+```bash
+--set minio.persistence.mode=emptyDir
+```
+
 ## 3. Instalação
 
 ```bash
@@ -40,8 +46,16 @@ kubectl -n openoju get secret openoju-secrets \
   -o jsonpath='{.data.OJU_SETUP_TOKEN}' | base64 -d
 ```
 
-## 5. Teste do chart
+## 5. Teste do chart e fluxo completo
 
 ```bash
 helm test openoju -n openoju
+
+TOKEN=$(kubectl -n openoju get secret openoju-secrets \
+  -o jsonpath='{.data.OJU_SETUP_TOKEN}' | base64 -d)
+./scripts/make_sample.sh /tmp/moving.mp4
+python3 scripts/e2e.py --token "$TOKEN" --video /tmp/moving.mp4 --log-reads 6
 ```
+
+O script faz health, setup, login, upload, análise, espera o job e lê o log de
+job várias vezes (valida o caminho S3 entre réplicas).

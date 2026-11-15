@@ -410,7 +410,9 @@ def values_for(answers: dict[str, str]) -> dict:
         },
         "serviceAccount": {"create": True, "annotations": {}},
         "existingSecret": f'{answers["release"]}-secrets',
-        "secrets": {"create": spec["secret"] == "create", "databaseUrl": ""},
+        # O wizard sempre cria o Secret (helm upgrade não gerencia segredos
+        # vindos do Terraform). O chart mantém `secrets.create` para uso manual.
+        "secrets": {"create": False, "databaseUrl": ""},
         "config": {
             "OJU_PUBLIC_BASE_URL": f"https://{domain}" if tls != "none" else f"http://{domain}",
             "OJU_FRONTEND_BASE_URL": f"https://{domain}" if tls != "none" else f"http://{domain}",
