@@ -1134,8 +1134,17 @@ def action_plan(args: argparse.Namespace) -> int:
 
 
 def action_apply(args: argparse.Namespace) -> int:
+    global KUBECONFIG
     answers = load_answers(args.env)
     directory = env_dir(args.env)
+    # Isola o kubeconfig por ambiente: execuções paralelas (ou clouds distintas)
+    # não podem compartilhar ~/.kube/config.
+    if (
+        answers.get("cluster_mode") == "create"
+        and not os.environ.get("KUBECONFIG")
+        and KUBECONFIG is None
+    ):
+        KUBECONFIG = directory / "kubeconfig.yaml"
     problems = doctor(answers)
     if problems:
         for problem in problems:
@@ -1178,7 +1187,6 @@ def action_apply(args: argparse.Namespace) -> int:
                 secret_values[secret_key] = value
         kubeconfig_value = outputs.get("kubeconfig", {}).get("value")
         if kubeconfig_value:
-            global KUBECONFIG
             path = directory / "kubeconfig.yaml"
             path.write_text(kubeconfig_value, encoding="utf-8")
             path.chmod(0o600)
