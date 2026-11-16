@@ -124,7 +124,7 @@ def collect_artifacts(
 
 
 def _delete_artifacts(artifacts: DeletionArtifacts, settings: Settings) -> None:
-    if artifacts.storage_keys and settings.storage_backend == "s3":
+    if artifacts.storage_keys and settings.uses_object_storage:
         try:
             storage = get_storage(settings)
             for key in artifacts.storage_keys:

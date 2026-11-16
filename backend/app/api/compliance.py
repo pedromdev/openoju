@@ -327,7 +327,7 @@ def execute_dsr_deletion(
         .all()
         if ensure_utc(hold.expires_at) is None or ensure_utc(hold.expires_at) > now
     }
-    storage = get_storage(get_settings()) if get_settings().storage_backend == "s3" else None
+    storage = get_storage(get_settings()) if get_settings().uses_object_storage else None
     deleted = 0
     skipped = 0
     for event in _matching_events(db, dsr):

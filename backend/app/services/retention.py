@@ -45,7 +45,7 @@ def _active_holds(db: Session, organization_id: str, now: datetime) -> set[tuple
 
 
 def _delete_video_media(db: Session, video: Video, settings: Settings) -> int:
-    storage = get_storage(settings) if settings.storage_backend == "s3" else None
+    storage = get_storage(settings) if settings.uses_object_storage else None
     removed = 0
     for raw in (video.source_path, video.proxy_path, video.thumbnail_path):
         if raw:
@@ -66,7 +66,7 @@ def _delete_video_media(db: Session, video: Video, settings: Settings) -> int:
 
 
 def _delete_event_media(db: Session, event: Event, settings: Settings) -> int:
-    storage = get_storage(settings) if settings.storage_backend == "s3" else None
+    storage = get_storage(settings) if settings.uses_object_storage else None
     removed = 0
     for raw in (event.thumbnail_path, event.clip_path):
         if raw:
@@ -214,7 +214,7 @@ def run_retention(
         )
         .all()
     )
-    storage = get_storage(settings) if settings.storage_backend == "s3" else None
+    storage = get_storage(settings) if settings.uses_object_storage else None
     for job in stale_jobs:
         if storage is not None and job.log_key:
             storage.delete(job.log_key)

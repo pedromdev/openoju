@@ -11,6 +11,7 @@ from ..db import get_db
 from ..models import Event
 from ..permissions import EVENTS_REVIEW, EVENTS_VIEW
 from ..schemas import EventOut, ReviewUpdate
+from ..services.media import remote_media_response
 from ..services.serializers import event_out
 from ..tenancy import AuthPrincipal, log_access, scoped_get
 from ..storage import get_storage
@@ -69,7 +70,9 @@ def event_thumbnail(
         db, Event, principal.organization_id or "", event_id, detail="evento não encontrado"
     )
     if event.thumbnail_storage_key:
-        return RedirectResponse(get_storage().presign_get(event.thumbnail_storage_key), status_code=302)
+        return remote_media_response(
+            event.thumbnail_storage_key, "image/jpeg", headers={"Cache-Control": "no-cache"}
+        )
     if not event.thumbnail_path:
         raise HTTPException(status_code=404, detail="thumbnail não disponível")
     path = Path(event.thumbnail_path)
@@ -103,7 +106,7 @@ def event_clip(
             request=request,
             commit=True,
         )
-        return RedirectResponse(get_storage().presign_get(event.clip_storage_key), status_code=302)
+        return remote_media_response(event.clip_storage_key, "video/mp4")
     path = Path(event.clip_path or "")
     if not path.exists():
         raise HTTPException(status_code=404, detail="clipe não encontrado")

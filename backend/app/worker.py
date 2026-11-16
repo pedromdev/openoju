@@ -120,7 +120,7 @@ def _generate_artifacts(
         return
     clips_dir = _settings.org_clips_dir(video.organization_id)
     clips_dir.mkdir(parents=True, exist_ok=True)
-    storage = get_storage(_settings) if _settings.storage_backend == "s3" else None
+    storage = get_storage(_settings) if _settings.uses_object_storage else None
     for index, event in enumerate(events):
         clip = clips_dir / f"{event.id}.mp4"
         clip_log = job_dir / f"clip-{index}.log"
@@ -222,7 +222,7 @@ def _publish_job_log(db: Session, job_id: str, job_log: Path) -> None:
     the worker and the API.
     """
     settings = _settings
-    if settings.storage_backend != "s3" or not job_log.exists():
+    if not settings.uses_object_storage or not job_log.exists():
         return
     job = db.get(Job, job_id)
     if job is None or job.log_key:
@@ -299,7 +299,7 @@ def _process_job(job_id: str) -> None:
             source_path, proxy, _settings, probe, job_dir / "proxy.log"
         )
         video.proxy_path = str(proxy)
-        if _settings.storage_backend == "s3":
+        if _settings.uses_object_storage:
             key = _settings.storage_key(video.organization_id, "proxy", proxy.name)
             get_storage(_settings).upload(proxy, key)
             video.proxy_storage_key = key

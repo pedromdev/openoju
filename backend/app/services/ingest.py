@@ -168,7 +168,7 @@ async def save_upload(
 
     backend = settings.storage_backend
     storage_key = settings.storage_key(organization_id, "videos", destination.name)
-    if backend == "s3":
+    if backend != "local":
         # Upload straight to object storage so the worker can read the file from
         # any node; the local copy is only scratch space.
         try:
@@ -181,7 +181,7 @@ async def save_upload(
         id=token,
         organization_id=organization_id,
         filename=original_name,
-        source_path=None if backend == "s3" else str(destination.resolve()),
+        source_path=None if backend != "local" else str(destination.resolve()),
         storage_backend=backend,
         storage_key=storage_key,
         sha256=checksum,
@@ -199,7 +199,7 @@ async def save_upload(
     db.add(video)
     db.commit()
     db.refresh(video)
-    if backend == "s3":
+    if backend != "local":
         destination.unlink(missing_ok=True)
 
     job: Job | None = None
