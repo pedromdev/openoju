@@ -97,6 +97,18 @@ partes (`OJU_UPLOAD_MAX_BYTES`).
 `supplementalGroups`. Em nuvem mantenha `false`: o worker cai para CPU e evita
 pods presos em `Pending`.
 
+## Falha em hook de install
+
+Se o primeiro `install` falhar em um hook, o release fica em estado `failed`.
+Um `helm upgrade --install` seguinte roda os hooks de **pre-upgrade**, que
+executam antes dos recursos do release — com Postgres embutido isso repete o
+erro (`failed to resolve host ...-postgresql`). Antes de tentar de novo:
+
+```bash
+helm uninstall <release> -n <ns>
+kubectl -n <ns> delete job <release>-openoju-migrate --ignore-not-found
+```
+
 ## Verificação
 
 ```bash
