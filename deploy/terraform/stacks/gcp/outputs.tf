@@ -48,3 +48,7 @@ output "service_account_annotations" {
 output "kubeconfig_command" {
   value = "gcloud container clusters get-credentials ${local.create_cluster ? google_container_cluster.this[0].name : var.existing_cluster_name} --zone ${var.zone} --project ${var.project_id}"
 }
+
+output "image_registry" {
+  value = var.existing_gar_repository == "" ? "" : "${data.google_artifact_registry_repository.existing[0].location}-docker.pkg.dev/${var.project_id}/${var.existing_gar_repository}"
+}

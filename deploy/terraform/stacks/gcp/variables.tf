@@ -86,3 +86,33 @@ variable "existing_cluster_name" {
   type        = string
   default     = ""
 }
+
+variable "system_node_count" {
+  description = "Nós do pool de sistema."
+  type        = number
+  default     = 2
+}
+
+variable "system_machine_type" {
+  description = "Tipo de máquina do pool de sistema."
+  type        = string
+  default     = "e2-standard-2"
+}
+
+variable "db_authorized_networks" {
+  description = "Redes autorizadas a conectar no Cloud SQL (use 0.0.0.0/0 apenas em validação)."
+  type        = list(string)
+  default     = []
+}
+
+variable "existing_gar_repository" {
+  description = "Repositório do Artifact Registry com a imagem (vazio = sem GAR gerenciado)."
+  type        = string
+  default     = ""
+}
+
+variable "existing_gar_location" {
+  description = "Região do repositório do Artifact Registry."
+  type        = string
+  default     = ""
+}

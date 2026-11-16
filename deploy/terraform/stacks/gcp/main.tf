@@ -71,10 +71,10 @@ resource "google_container_node_pool" "system" {
   name       = "system"
   cluster    = google_container_cluster.this[0].name
   location   = var.zone
-  node_count = 2
+  node_count = var.system_node_count
 
   node_config {
-    machine_type = "e2-standard-2"
+    machine_type = var.system_machine_type
     labels = {
       "openoju.io/pool" = "system"
     }
@@ -138,6 +138,14 @@ resource "google_sql_database_instance" "this" {
     ip_configuration {
       ipv4_enabled = true
       ssl_mode     = "ENCRYPTED_ONLY"
+
+      dynamic "authorized_networks" {
+        for_each = var.db_authorized_networks
+        content {
+          name  = "allowed-${authorized_networks.key}"
+          value = authorized_networks.value
+        }
+      }
     }
 
     backup_configuration {
@@ -218,4 +226,21 @@ resource "google_service_account_iam_member" "workload_identity" {
   service_account_id = google_service_account.app.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[${var.namespace}/${local.ksa}]"
+}
+
+data "google_project" "this" {}
+
+data "google_artifact_registry_repository" "existing" {
+  count         = var.existing_gar_repository == "" ? 0 : 1
+  location      = var.existing_gar_location != "" ? var.existing_gar_location : var.region
+  repository_id = var.existing_gar_repository
+}
+
+resource "google_artifact_registry_repository_iam_member" "node_reader" {
+  count = var.existing_gar_repository == "" || !local.create_cluster ? 0 : 1
+
+  location   = data.google_artifact_registry_repository.existing[0].location
+  repository = data.google_artifact_registry_repository.existing[0].name
+  role       = "roles/artifactregistry.reader"
+  member     = "serviceAccount:${data.google_project.this.number}-compute@developer.gserviceaccount.com"
 }

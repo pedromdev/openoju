@@ -328,6 +328,9 @@ def default_answers(name: str, target: str) -> dict[str, str]:
         "azure_subscription": "",
         "azure_acr_name": "",
         "azure_acr_resource_group": "",
+        "gcp_gar_repository": "",
+        "gcp_gar_location": "",
+        "gcp_system_node_count": "1",
         "db_deletion_protection": "true",
         "bucket_force_destroy": "false",
         "system_node_count": "2",
@@ -398,6 +401,15 @@ def collect_answers(args: argparse.Namespace, prompter: Prompter) -> dict[str, s
             base["gcp_project"] = prompter.ask(
                 "Projeto GCP (project_id)", base.get("gcp_project") or ""
             )
+            base["gcp_gar_repository"] = prompter.ask(
+                "Repositório do Artifact Registry (vazio = ghcr)",
+                base.get("gcp_gar_repository") or "",
+            )
+            if base["gcp_gar_repository"]:
+                base["gcp_gar_location"] = prompter.ask(
+                    "Região do Artifact Registry",
+                    base.get("gcp_gar_location") or base.get("region") or "",
+                )
         if target == "azure":
             base["azure_subscription"] = prompter.ask(
                 "Subscription do Azure (ID)", base.get("azure_subscription") or ""
@@ -588,8 +600,14 @@ def tfvars_for(answers: dict[str, str]) -> dict:
             data["existing_acr_resource_group"] = answers.get(
                 "azure_acr_resource_group", ""
             )
-    if target == "gcp" and answers.get("gcp_project"):
-        data["project_id"] = answers["gcp_project"]
+    if target == "gcp":
+        if answers.get("gcp_project"):
+            data["project_id"] = answers["gcp_project"]
+        if answers.get("gcp_gar_repository"):
+            data["existing_gar_repository"] = answers["gcp_gar_repository"]
+            data["existing_gar_location"] = answers.get("gcp_gar_location", "")
+        if answers.get("gcp_system_node_count"):
+            data["system_node_count"] = int(answers["gcp_system_node_count"])
     if target == "aws":
         data["db_deletion_protection"] = (
             answers.get("db_deletion_protection", "true") == "true"
