@@ -9,6 +9,18 @@ GKE + Cloud SQL + GCS (modo interoperabilidade) + GCLB.
 - Terraform >= 1.7, `helm`, `kubectl`.
 - IP global estático e certificado gerenciado para o Ingress.
 
+## Destroy
+
+O `destroy` remove o cluster, a VPC, a GSA e o bucket. Dois cuidados:
+
+- **Bucket**: o GCS recusa remoção com objetos. Use `bucket_force_destroy: true`
+  em `answers.yaml` (o wizard mapeia para `bucket_force_destroy` no stack) ou
+  esvazie antes (`gcloud storage rm -r gs://<bucket>/**`).
+- **Cloud SQL**: o provider tenta apagar database e usuário antes da instância e
+  falha se houver conexões/objetos. Pare os pods (o Helm uninstall já faz) e,
+  se necessário, apague a instância direto:
+  `gcloud sql instances delete <instancia> --quiet`.
+
 ## Plugin de autenticação do GKE
 
 `kubectl` no GKE usa o plugin `gke-gcloud-auth-plugin`:

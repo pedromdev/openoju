@@ -122,3 +122,9 @@ variable "db_edition" {
   type        = string
   default     = "ENTERPRISE"
 }
+
+variable "bucket_force_destroy" {
+  description = "Permite destruir o bucket com objetos (apenas validação)."
+  type        = bool
+  default     = false
+}

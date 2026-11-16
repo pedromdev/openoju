@@ -601,6 +601,9 @@ def tfvars_for(answers: dict[str, str]) -> dict:
                 "azure_acr_resource_group", ""
             )
     if target == "gcp":
+        data["bucket_force_destroy"] = (
+            answers.get("bucket_force_destroy", "false") == "true"
+        )
         if answers.get("gcp_project"):
             data["project_id"] = answers["gcp_project"]
         if answers.get("gcp_gar_repository"):

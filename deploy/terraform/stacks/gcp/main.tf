@@ -177,7 +177,7 @@ resource "google_storage_bucket" "media" {
 
   name                        = "${local.name}-media"
   location                    = upper(var.region)
-  force_destroy               = false
+  force_destroy               = var.bucket_force_destroy
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
