@@ -342,7 +342,7 @@ def default_answers(name: str, target: str) -> dict[str, str]:
             "aws": "db.t4g.medium",
             "gcp": "db-custom-2-4096",
             "azure": "GP_Standard_D2ds_v5",
-            "magalu": "small",
+            "magalu": "",
         }.get(target, ""),
     }
 
@@ -583,15 +583,22 @@ def tfvars_for(answers: dict[str, str]) -> dict:
         "environment": answers["environment"],
         "region": answers["region"],
         "node_count": int(answers["node_count"]),
-        "system_node_count": int(answers.get("system_node_count") or 2),
         "cluster_mode": answers["cluster_mode"],
         "domain": answers["domain"],
         "namespace": answers["namespace"],
         "release_name": answers["release"],
-        "db_instance_class": answers["db_instance"],
         "create_database": answers["database"] == "managed",
         "create_bucket": answers["storage"] == "managed",
     }
+    if target in {"aws", "gcp", "azure"}:
+        data["system_node_count"] = int(answers.get("system_node_count") or 2)
+    if target in {"aws", "gcp", "azure"}:
+        data["db_instance_class"] = answers["db_instance"]
+    if target == "magalu":
+        if answers.get("db_instance"):
+            data["db_instance_type"] = answers["db_instance"]
+        if answers.get("db_engine_version"):
+            data["db_engine_version"] = answers["db_engine_version"]
     if target == "azure":
         data["create_bucket"] = False
         if answers.get("azure_subscription"):

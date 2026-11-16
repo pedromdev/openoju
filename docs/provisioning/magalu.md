@@ -23,6 +23,39 @@ MKE (Magalu Kubernetes Engine) + DBaaS PostgreSQL + Object Storage.
 | Load Balancer as a Service | exposição do ingress |
 | Container Registry | imagem alternativa ao ghcr |
 
+## DBaaS: engine e tipo explícitos
+
+O provider 0.56 pagina `instance-types` até um offset que a API rejeita com
+`400 Invalid HTTP request` e não expõe `scopes` na API key. Para evitar a
+paginação, informe explicitamente:
+
+```yaml
+db_engine_version: "17"                 # postgresql 15/16/17 ACTIVE
+db_instance: cloud-dbaas-bs1.small      # 1 vCPU / 3 GB
+```
+
+O stack pula os data sources quando os valores estão preenchidos. Mantenha
+`db_engine_name: postgresql` (default).
+
+## Imagem
+
+O registry da Magalu exige o escopo **Container Registry [Write]** na API key;
+sem ele, `registries create` responde `403`. Duas saídas:
+
+1. criar uma API key nova marcando Container Registry (Write) e publicar em
+   `<registry>.registry.br-se1.magalu.cloud`;
+2. usar um registry público efêmero para validação:
+
+```bash
+docker tag openoju:local ttl.sh/openoju-val:24h
+docker push ttl.sh/openoju-val:24h
+```
+
+```yaml
+image_repository: ttl.sh/openoju-val
+image_tag: "24h"
+```
+
 ## Infraestrutura
 
 ```bash

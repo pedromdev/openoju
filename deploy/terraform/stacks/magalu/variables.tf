@@ -83,3 +83,15 @@ variable "existing_cluster_id" {
   type        = string
   default     = ""
 }
+
+variable "db_engine_name" {
+  description = "Engine do DBaaS (ex.: postgresql)."
+  type        = string
+  default     = "postgresql"
+}
+
+variable "db_engine_version" {
+  description = "Versão do engine. Vazio consulta a API (pode falhar na paginação)."
+  type        = string
+  default     = ""
+}

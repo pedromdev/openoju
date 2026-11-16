@@ -40,19 +40,22 @@ data "mgc_kubernetes_cluster_kubeconfig" "this" {
 }
 
 data "mgc_dbaas_instance_types" "available" {
-  count = var.create_database ? 1 : 0
+  count = var.create_database && var.db_instance_type == "" ? 1 : 0
 }
 
 data "mgc_dbaas_engines" "available" {
-  count  = var.create_database ? 1 : 0
+  count  = var.create_database && var.db_engine_version == "" ? 1 : 0
   status = "ACTIVE"
 }
 
 locals {
-  pg_engine = var.create_database ? one([
+  pg_engine = var.create_database && var.db_engine_version == "" ? one([
     for engine in data.mgc_dbaas_engines.available[0].engines :
-    engine if can(regex("postgres", lower(engine.name)))
+    engine if can(regex(lower(var.db_engine_name), lower(engine.name)))
   ]) : null
+
+  db_engine_version = var.db_engine_version != "" ? var.db_engine_version : local.pg_engine.version
+  db_instance_type  = var.db_instance_type != "" ? var.db_instance_type : data.mgc_dbaas_instance_types.available[0].instance_types[0].name
 }
 
 resource "random_password" "db" {
@@ -67,9 +70,9 @@ resource "mgc_dbaas_instances" "this" {
   name                  = "${local.name}-pg"
   user                  = "openoju"
   password              = random_password.db[0].result
-  engine_name           = local.pg_engine.name
-  engine_version        = local.pg_engine.version
-  instance_type         = var.db_instance_type != "" ? var.db_instance_type : data.mgc_dbaas_instance_types.available[0].instance_types[0].name
+  engine_name           = var.db_engine_name
+  engine_version        = local.db_engine_version
+  instance_type         = local.db_instance_type
   volume_size           = var.db_volume_size
   volume_type           = "CLOUD_NVME15K"
   backup_retention_days = 7
