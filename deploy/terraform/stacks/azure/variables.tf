@@ -36,7 +36,7 @@ variable "node_count" {
 variable "node_vm_size" {
   description = "Tamanho das VMs do pool de aplicação."
   type        = string
-  default     = "Standard_D4ds_v5"
+  default     = "Standard_D2ds_v5"
 }
 
 variable "db_instance_class" {
@@ -84,5 +84,23 @@ variable "existing_cluster_name" {
 variable "cluster_version" {
   description = "Versão do Kubernetes no AKS."
   type        = string
-  default     = "1.31"
+  default     = "1.36"
+}
+
+variable "system_node_count" {
+  description = "Nós do pool de sistema (default pool do AKS)."
+  type        = number
+  default     = 2
+}
+
+variable "existing_acr_name" {
+  description = "ACR já existente com a imagem do OpenOju (vazio = sem ACR gerenciado)."
+  type        = string
+  default     = ""
+}
+
+variable "existing_acr_resource_group" {
+  description = "Resource group do ACR existente."
+  type        = string
+  default     = ""
 }

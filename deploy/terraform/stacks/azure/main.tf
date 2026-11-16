@@ -35,7 +35,7 @@ resource "azurerm_kubernetes_cluster" "this" {
 
   default_node_pool {
     name           = "system"
-    node_count     = 2
+    node_count     = var.system_node_count
     vm_size        = "Standard_D2ds_v5"
     vnet_subnet_id = azurerm_subnet.aks.id
     node_labels = {
@@ -133,4 +133,18 @@ resource "azurerm_federated_identity_credential" "app" {
   audience                  = ["api://AzureADTokenExchange"]
   issuer                    = azurerm_kubernetes_cluster.this[0].oidc_issuer_url
   subject                   = "system:serviceaccount:${var.namespace}:${local.ksa}"
+}
+
+data "azurerm_container_registry" "existing" {
+  count               = var.existing_acr_name == "" ? 0 : 1
+  name                = var.existing_acr_name
+  resource_group_name = var.existing_acr_resource_group != "" ? var.existing_acr_resource_group : azurerm_resource_group.this.name
+}
+
+resource "azurerm_role_assignment" "acr_pull" {
+  count = var.existing_acr_name == "" || !local.create_cluster ? 0 : 1
+
+  scope                = data.azurerm_container_registry.existing[0].id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_kubernetes_cluster.this[0].kubelet_identity[0].object_id
 }

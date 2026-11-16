@@ -30,3 +30,7 @@ output "service_account_annotations" {
 output "kubeconfig_command" {
   value = "az aks get-credentials --resource-group ${azurerm_resource_group.this.name} --name ${local.create_cluster ? azurerm_kubernetes_cluster.this[0].name : var.existing_cluster_name}"
 }
+
+output "image_registry" {
+  value = var.existing_acr_name == "" ? "" : data.azurerm_container_registry.existing[0].login_server
+}

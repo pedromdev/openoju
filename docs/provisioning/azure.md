@@ -44,6 +44,63 @@ minio:
     host: s3.<dominio>
 ```
 
+## Cota de vCPU (conta gratuita)
+
+Assinaturas de avaliação costumam ter **4 vCPUs regionais**. O preset padrão
+(2 nós `system` + `node_count` × `D4ds_v5`) não cabe. Para validar:
+
+```yaml
+system_node_count: 1
+node_count: 1
+# opcional: banco menor
+db_instance: B_Standard_B1ms
+```
+
+Com `Standard_D2ds_v5` em ambos os pools são 4 vCPUs no total. Para produção,
+peça aumento em **Subscriptions → Usage + quotas → Total Regional vCPUs**.
+
+## ACR e imagem
+
+O ACR não é criado pelo stack (a imagem precisa existir antes do Helm). Crie
+antes:
+
+```bash
+RG=openoju-val-images
+ACR=openojuval$(python3 -c 'import secrets;print(secrets.token_hex(3))')
+
+az group create -n "$RG" -l brazilsouth
+az acr create -g "$RG" -n "$ACR" --sku Basic --admin-enabled false
+az acr login -n "$ACR"
+docker build --platform linux/amd64 -t "$ACR.azurecr.io/openoju:val" .
+docker push "$ACR.azurecr.io/openoju:val"
+```
+
+Depois informe no `answers.yaml`:
+
+```yaml
+azure_acr_name: <acr>
+azure_acr_resource_group: openoju-val-images
+image_repository: <acr>.azurecr.io/openoju
+image_tag: val
+```
+
+O stack cria a role `AcrPull` para a kubelet identity do AKS, então não é
+preciso `imagePullSecrets` nem `--attach-acr`.
+
+> **Assinatura de avaliação:** `az acr build` (ACR Tasks) costuma ser bloqueado
+> (`TasksOperationsNotAllowed`). Use `docker push`. Se o domínio
+> `<acr>.azurecr.io` não resolver localmente logo após a criação, o DNS público
+> já funciona — publique de um container com DNS explícito:
+>
+> ```bash
+> docker save "$ACR.azurecr.io/openoju:val" -o /tmp/openoju.tar
+> TOKEN=$(az acr login -n "$ACR" --expose-token --query accessToken -o tsv)
+> docker run --rm --dns 8.8.8.8 -v /tmp/openoju.tar:/img.tar \
+>   quay.io/skopeo/stable copy \
+>   --dest-creds "00000000-0000-0000-0000-000000000000:$TOKEN" \
+>   docker-archive:/img.tar "docker://$ACR.azurecr.io/openoju:val"
+> ```
+
 ## StorageClass
 
 O preset usa `managed-csi` (Azure Disk). Para MinIO maior, prefira um disco

@@ -326,6 +326,8 @@ def default_answers(name: str, target: str) -> dict[str, str]:
         "node_count": "2",
         "gcp_project": "",
         "azure_subscription": "",
+        "azure_acr_name": "",
+        "azure_acr_resource_group": "",
         "db_deletion_protection": "true",
         "bucket_force_destroy": "false",
         "system_node_count": "2",
@@ -400,6 +402,15 @@ def collect_answers(args: argparse.Namespace, prompter: Prompter) -> dict[str, s
             base["azure_subscription"] = prompter.ask(
                 "Subscription do Azure (ID)", base.get("azure_subscription") or ""
             )
+            base["azure_acr_name"] = prompter.ask(
+                "ACR com a imagem (vazio = usar ghcr)",
+                base.get("azure_acr_name") or "",
+            )
+            if base["azure_acr_name"]:
+                base["azure_acr_resource_group"] = prompter.ask(
+                    "Resource group do ACR",
+                    base.get("azure_acr_resource_group") or "",
+                )
         if target == "magalu":
             base["mgc_key_pair_id"] = prompter.ask(
                 "Object Storage key pair ID (access key)",
@@ -572,6 +583,11 @@ def tfvars_for(answers: dict[str, str]) -> dict:
         data["create_bucket"] = False
         if answers.get("azure_subscription"):
             data["subscription_id"] = answers["azure_subscription"]
+        if answers.get("azure_acr_name"):
+            data["existing_acr_name"] = answers["azure_acr_name"]
+            data["existing_acr_resource_group"] = answers.get(
+                "azure_acr_resource_group", ""
+            )
     if target == "gcp" and answers.get("gcp_project"):
         data["project_id"] = answers["gcp_project"]
     data["db_deletion_protection"] = answers.get("db_deletion_protection", "true") == "true"
