@@ -154,3 +154,30 @@ Kubernetes multi-nó: log de job fora do filesystem e rate limit compartilhado.
 
 Resultado local (kind, 2026-11-15): todas as etapas verdes, incluindo 6 leituras
 do log com a API em duas réplicas.
+
+## Cobertura do E2E (`scripts/e2e.py`)
+
+| Etapa | O que valida |
+|---|---|
+| health / setup / login | API, token de setup, sessão e CSRF |
+| upload simples | `POST /videos/upload` (multipart único) |
+| upload chunked | `POST /uploads/init` → `PUT parts` → `complete` |
+| upload presigned | `POST /ingest/uploads` com API key → `PUT` nas URLs assinadas → `complete` |
+| análise | worker baixa do storage, roda OpenCV, gera proxy/clipes/thumbs, conclui o job |
+| log do job | `GET /jobs/{id}/log` várias vezes com 2 réplicas |
+| mídia | stream, thumbnail do vídeo, lista de eventos, thumbnail e clipe do evento |
+| rate limit (opcional) | 429 após N tentativas de login com e-mail descartável |
+
+Notas:
+
+- O S3/MinIO exige **5 MiB por parte** (exceto a última). Para exercitar
+  multipart de verdade, gere a amostra com bitrate:
+  `./scripts/make_sample.sh /tmp/big.mp4 20 1280x720 5M` e configure
+  `OJU_S3_PART_SIZE=5242880`.
+- `--expect-multipart` falha se o upload tiver só uma parte.
+- O presigned precisa que `OJU_S3_ENDPOINT` seja alcançável pela máquina que
+  roda o E2E. Em cluster local, publique o MinIO (`port-forward 9000:9000`) e
+  use `OJU_S3_ENDPOINT=http://localhost:9000` (o wizard já faz isso quando não
+  há TLS).
+- Dedupe por SHA-256: reenviar o mesmo arquivo devolve o vídeo/job existentes.
+  Os caminhos de upload continuam exercitados; a análise roda uma vez.

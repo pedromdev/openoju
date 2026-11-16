@@ -184,6 +184,7 @@ jobs:
             --set config.OJU_RATE_LIMIT_BACKEND=postgres \
             --set config.OJU_S3_INTERNAL_ENDPOINT=http://openoju-openoju-minio:9000 \
             --set minio.persistence.mode=emptyDir \
+            --set config.OJU_S3_PART_SIZE=5242880 \
             --timeout 15m
       - name: Wait for workloads
         run: |
@@ -195,17 +196,20 @@ jobs:
       - name: End-to-end flow
         run: |
           kubectl -n openoju port-forward svc/openoju-openoju 8000:8000 &
+          kubectl -n openoju port-forward svc/openoju-openoju-minio 9000:9000 &
           for _ in $(seq 1 30); do
             curl -sf http://127.0.0.1:8000/api/health >/dev/null && break
             sleep 2
           done
           TOKEN=$(kubectl -n openoju get secret openoju-secrets \
             -o jsonpath='{.data.OJU_SETUP_TOKEN}' | base64 -d)
-          ./scripts/make_sample.sh /tmp/openoju/moving.mp4
+          ./scripts/make_sample.sh /tmp/openoju/moving.mp4 20 1280x720 5M
           python3 scripts/e2e.py \
             --token "$TOKEN" \
             --video /tmp/openoju/moving.mp4 \
-            --log-reads 6
+            --log-reads 6 \
+            --expect-multipart \
+            --rate-limit
       - name: Dump diagnostics on failure
         if: failure()
         run: |

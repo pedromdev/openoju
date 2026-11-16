@@ -538,7 +538,8 @@ def values_for(answers: dict[str, str]) -> dict:
         values["config"]["OJU_S3_INTERNAL_ENDPOINT"] = (
             f"http://{release}-openoju-minio:9000"
         )
-        if target == "local":
+        # Sem TLS não há host público: o presign aponta para o port-forward.
+        if target == "local" or tls == "none":
             values["config"]["OJU_S3_ENDPOINT"] = "http://localhost:9000"
             values["minio"]["public"] = {
                 "enabled": False,
