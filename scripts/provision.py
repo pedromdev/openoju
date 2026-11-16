@@ -1128,6 +1128,7 @@ def action_apply(args: argparse.Namespace) -> int:
     env_args: list[str] = []
     for key, value in secret_values.items():
         env_args += [f"--from-literal={key}={value}"]
+    # quiet: o comando carrega --from-literal com todos os segredos.
     secret_manifest = run(
         [
             "kubectl",
@@ -1143,7 +1144,9 @@ def action_apply(args: argparse.Namespace) -> int:
             "yaml",
         ],
         capture=True,
+        quiet=True,
     )
+    print("$ kubectl create secret generic <release>-secrets --from-literal=...")
     apply_stdin(secret_manifest)
 
     run(
