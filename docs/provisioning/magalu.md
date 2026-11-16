@@ -23,6 +23,25 @@ MKE (Magalu Kubernetes Engine) + DBaaS PostgreSQL + Object Storage.
 | Load Balancer as a Service | exposição do ingress |
 | Container Registry | imagem alternativa ao ghcr |
 
+## DBaaS: rede privada e bug do provider
+
+Na conta validada o DBaaS só expõe endereço **PRIVATE**, e o MKE é criado em
+outra rede — sem peering/subnet compartilhada o pod não alcança o banco. Além
+disso, o provider 0.56 cria a instância e falha em um `PUT` seguinte com
+`400 Invalid HTTP request`, deixando a instância órfã (fora do state).
+
+Consequências práticas:
+
+- Para **validar** o cluster + Object Storage, use Postgres embutido:
+  `database: bundled` (o chart sobe um StatefulSet com volume).
+- Para produção com DBaaS, crie o cluster com `subnet_ids` da mesma rede do
+  banco (ou configure peering) e confirme se o tipo oferece acesso público.
+- Se o provider falhar no `PUT`, importe a instância
+  (`terraform import 'mgc_dbaas_instances.this[0]' <id>`) ou apague pelo
+  console/CLI após sair de `CREATING`:
+  `mgc dbaas instances update --instance-id <id> --deletion-protected=false`
+  e `mgc dbaas instances delete --instance-id <id>`.
+
 ## Node pool: flavor de VM, não de Kubernetes
 
 O data source `mgc_kubernetes_flavor` devolve nomes no formato
