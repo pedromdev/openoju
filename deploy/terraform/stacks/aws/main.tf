@@ -24,16 +24,19 @@ module "k8s" {
 module "deps" {
   source = "../../modules/deps-aws"
 
-  environment          = var.environment
-  vpc_id               = local.vpc_id
-  subnet_ids           = local.subnet_ids
-  oidc_provider_arn    = local.oidc_arn
-  oidc_issuer          = local.oidc_issuer
-  namespace            = var.namespace
-  service_account_name = "${var.release_name}-openoju"
-  db_instance_class    = var.db_instance_class
-  multi_az             = var.multi_az
-  cors_origins         = local.cors_origins
-  create_database      = var.create_database
-  create_bucket        = var.create_bucket
+  environment            = var.environment
+  vpc_id                 = local.vpc_id
+  subnet_ids             = local.subnet_ids
+  oidc_provider_arn      = local.oidc_arn
+  oidc_issuer            = local.oidc_issuer
+  namespace              = var.namespace
+  service_account_name   = "${var.release_name}-openoju"
+  db_instance_class      = var.db_instance_class
+  multi_az               = var.multi_az
+  cors_origins           = local.cors_origins
+  create_database        = var.create_database
+  create_bucket          = var.create_bucket
+  db_deletion_protection = var.db_deletion_protection
+  bucket_force_destroy   = var.bucket_force_destroy
+  create_irsa            = var.create_bucket && (local.create_cluster || var.existing_oidc_provider_arn != "")
 }
