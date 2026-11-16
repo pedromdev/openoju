@@ -338,6 +338,7 @@ def default_answers(name: str, target: str) -> dict[str, str]:
         "image_repository": "",
         "image_tag": "",
         "mgc_key_pair_id": "",
+        "mgc_node_flavor": "",
         "db_instance": {
             "aws": "db.t4g.medium",
             "gcp": "db-custom-2-4096",
@@ -599,6 +600,8 @@ def tfvars_for(answers: dict[str, str]) -> dict:
             data["db_instance_type"] = answers["db_instance"]
         if answers.get("db_engine_version"):
             data["db_engine_version"] = answers["db_engine_version"]
+        if answers.get("mgc_node_flavor"):
+            data["node_flavor"] = answers["mgc_node_flavor"]
     if target == "azure":
         data["create_bucket"] = False
         if answers.get("azure_subscription"):

@@ -23,6 +23,18 @@ MKE (Magalu Kubernetes Engine) + DBaaS PostgreSQL + Object Storage.
 | Load Balancer as a Service | exposição do ingress |
 | Container Registry | imagem alternativa ao ghcr |
 
+## Node pool: flavor de VM, não de Kubernetes
+
+O data source `mgc_kubernetes_flavor` devolve nomes no formato
+`cloud-k8s.gp1.small`, que a API de node pools rejeita ("use magalu virtual
+machine API to get valid machine type"). Use um tipo de VM:
+
+```yaml
+mgc_node_flavor: BV2-4-100   # 2 vCPU, 4 GB, 100 GB
+```
+
+Liste os válidos com `mgc virtual-machine machine-types list`.
+
 ## DBaaS: engine e tipo explícitos
 
 O provider 0.56 pagina `instance-types` até um offset que a API rejeita com
@@ -30,12 +42,14 @@ O provider 0.56 pagina `instance-types` até um offset que a API rejeita com
 paginação, informe explicitamente:
 
 ```yaml
-db_engine_version: "17"                 # postgresql 15/16/17 ACTIVE
-db_instance: cloud-dbaas-bs1.small      # 1 vCPU / 3 GB
+db_engine_version: "17"                        # postgresql 15/16/17 ACTIVE
+db_instance: cloud-dbas-pgs-bv-i1-c1-r4-d10    # 1 vCPU / 4 GB, SINGLE_INSTANCE
 ```
 
 O stack pula os data sources quando os valores estão preenchidos. Mantenha
-`db_engine_name: postgresql` (default).
+`db_engine_name: postgresql` (default). Os tipos antigos (`i0-*`,
+`cloud-dbaas-bs1.*`) estão `DEPRECATED`; confirme com
+`mgc dbaas instance-types list --engine-id <uuid> --status ACTIVE`.
 
 ## Imagem
 
