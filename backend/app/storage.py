@@ -39,6 +39,11 @@ def _client(settings: Settings, *, public: bool):
             signature_version="s3v4",
             s3={"addressing_style": "path"},
             retries={"max_attempts": 3, "mode": "standard"},
+            # O botocore >= 1.36 envia x-amz-checksum-* por padrão; o GCS em
+            # modo interoperabilidade rejeita esses cabeçalhos com
+            # SignatureDoesNotMatch. "when_required" mantém S3/MinIO felizes.
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
         ),
         **credentials,
     )

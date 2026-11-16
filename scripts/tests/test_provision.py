@@ -199,3 +199,18 @@ def test_aws_managed_storage_does_not_generate_static_s3_keys():
     bundled = provision.default_answers("dev", "local")
     bundled_secrets = provision.secrets_for(bundled)
     assert "OJU_S3_ACCESS_KEY" in bundled_secrets
+
+
+def test_render_preserves_terraform_outputs(env_root):
+    answers = provision.default_answers("prod", "gcp")
+    answers["gcp_project"] = "openoju-prod"
+    directory = provision.render_environment(answers)
+    (directory / "outputs.json").write_text(
+        '{"bucket": "openoju-prod-media", "s3_endpoint": "https://storage.googleapis.com", '
+        '"service_account_annotations": {"iam.gke.io/gcp-service-account": "sa@x"}}',
+        encoding="utf-8",
+    )
+    provision.render_environment(answers)
+    values = (directory / "values.yaml").read_text(encoding="utf-8")
+    assert "OJU_S3_BUCKET: openoju-prod-media" in values
+    assert "iam.gke.io/gcp-service-account: sa@x" in values

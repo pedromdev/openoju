@@ -658,6 +658,43 @@ def secrets_for(answers: dict[str, str], previous: dict[str, str] | None = None)
     return values
 
 
+def apply_outputs(values: dict, outputs: dict) -> dict:
+    """Aplica ao values o que só o Terraform sabe (bucket, IRSA, endpoints)."""
+    config = values.setdefault("config", {})
+    if outputs.get("bucket"):
+        config["OJU_S3_BUCKET"] = outputs["bucket"]
+    if outputs.get("s3_endpoint"):
+        config["OJU_S3_ENDPOINT"] = outputs["s3_endpoint"]
+    if outputs.get("s3_region"):
+        config["OJU_S3_REGION"] = outputs["s3_region"]
+    annotations = outputs.get("service_account_annotations")
+    if annotations:
+        values.setdefault("serviceAccount", {})["annotations"] = annotations
+    return values
+
+
+def read_outputs(directory: Path) -> dict:
+    path = directory / "outputs.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def write_outputs(directory: Path, outputs: dict) -> None:
+    keep = {
+        key: outputs[key]
+        for key in ("bucket", "s3_endpoint", "s3_region", "service_account_annotations")
+        if outputs.get(key)
+    }
+    if keep:
+        (directory / "outputs.json").write_text(
+            json.dumps(keep, indent=2) + "\n", encoding="utf-8"
+        )
+
+
 def render_environment(answers: dict[str, str], *, force: bool = False) -> Path:
     directory = env_dir(answers["environment"])
     directory.mkdir(parents=True, exist_ok=True)
@@ -667,6 +704,7 @@ def render_environment(answers: dict[str, str], *, force: bool = False) -> Path:
     new_secrets = secrets_for(answers, previous)
 
     values = values_for(answers)
+    apply_outputs(values, read_outputs(directory))
     (directory / "answers.yaml").write_text(
         "# Gerado por scripts/provision.py — não contém segredos.\n"
         + dump_yaml(answers)
@@ -1114,12 +1152,9 @@ def action_apply(args: argparse.Namespace) -> int:
         database_url = outputs.get("database_url", {}).get("value")
         if database_url:
             secret_values["OJU_DATABASE_URL"] = database_url
-        bucket = outputs.get("bucket", {}).get("value")
-        if bucket:
-            values["config"]["OJU_S3_BUCKET"] = bucket
-        annotations = outputs.get("service_account_annotations", {}).get("value")
-        if annotations:
-            values.setdefault("serviceAccount", {})["annotations"] = annotations
+        resolved = {key: data.get("value") for key, data in outputs.items()}
+        apply_outputs(values, resolved)
+        write_outputs(directory, resolved)
         for output_key, secret_key in (
             ("s3_access_key", "OJU_S3_ACCESS_KEY"),
             ("s3_secret_key", "OJU_S3_SECRET_KEY"),
@@ -1127,13 +1162,6 @@ def action_apply(args: argparse.Namespace) -> int:
             value = outputs.get(output_key, {}).get("value")
             if value:
                 secret_values[secret_key] = value
-        for output_key, config_key in (
-            ("s3_endpoint", "OJU_S3_ENDPOINT"),
-            ("s3_region", "OJU_S3_REGION"),
-        ):
-            value = outputs.get(output_key, {}).get("value")
-            if value:
-                values["config"][config_key] = value
         kubeconfig_value = outputs.get("kubeconfig", {}).get("value")
         if kubeconfig_value:
             global KUBECONFIG

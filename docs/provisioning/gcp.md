@@ -97,7 +97,10 @@ OJU_S3_ACCESS_KEY=<hmac access id>
 OJU_S3_SECRET_KEY=<hmac secret>
 ```
 
-O código já usa `addressing_style: path`, exigido pelo GCS.
+O código já usa `addressing_style: path`, exigido pelo GCS, e desativa o
+checksum opcional do botocore (`request_checksum_calculation="when_required"`).
+Sem isso, o botocore ≥ 1.36 envia `x-amz-checksum-*` e o GCS responde
+`SignatureDoesNotMatch`.
 
 Limitações conhecidas: `put_bucket_cors` pode ser recusado dependendo da
 política do bucket. O CORS é aplicado pelo Terraform; falhas no runtime são

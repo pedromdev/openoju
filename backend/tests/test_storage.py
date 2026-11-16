@@ -137,3 +137,28 @@ def test_s3_client_falls_back_to_public_endpoint(monkeypatch):
     )
     storage._client(settings, public=False)
     assert captured["endpoint_url"] == "https://s3.us-east-1.amazonaws.com"
+
+
+def test_s3_client_disables_optional_checksums(monkeypatch):
+    from app import storage
+
+    captured: dict = {}
+
+    def fake_client(name, **kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(storage.boto3, "client", fake_client)
+    storage._client(
+        storage.get_settings().model_copy(
+            update={
+                "s3_internal_endpoint": "https://storage.googleapis.com",
+                "s3_access_key": "key",
+                "s3_secret_key": "secret",
+            }
+        ),
+        public=False,
+    )
+    config = captured["config"]
+    assert config.request_checksum_calculation == "when_required"
+    assert config.response_checksum_validation == "when_required"

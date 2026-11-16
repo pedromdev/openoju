@@ -47,6 +47,10 @@ python3 scripts/provision.py init --env prod --answers /tmp/answers.yaml --yes
 
 `answers.yaml` nunca contém segredos; `secrets.env` nunca é versionado.
 
+`apply` grava os valores que só o Terraform conhece (bucket, endpoint, anotações
+de IRSA/Workload Identity) em `outputs.json`. `render` reaplica esse arquivo,
+então regenerar os values não perde o bucket real do provedor.
+
 `destroy` tolera um cluster já removido: se o `helm uninstall` não alcançar o
 API server (destroy parcial anterior), ele avisa e segue para o
 `terraform destroy` do restante da infraestrutura.
