@@ -35,7 +35,9 @@ db_authorized_networks: ["0.0.0.0/0"]   # somente validação
 ```
 
 Cluster zonal tem control plane gratuito. Cloud SQL `db-f1-micro` é
-shared-core; suficiente para o E2E.
+shared-core; suficiente para o E2E. A partir de 2026 o Cloud SQL cria em
+`ENTERPRISE_PLUS` por padrão, que rejeita tiers compartilhados — o stack fixa
+`edition = "ENTERPRISE"` (ajustável em `db_edition`).
 
 > **Billing:** GKE e Cloud SQL exigem conta de faturamento **aberta**. Contas
 > fechadas aparecem com `open: false` em `gcloud billing accounts list` e o

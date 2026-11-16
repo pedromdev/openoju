@@ -116,3 +116,9 @@ variable "existing_gar_location" {
   type        = string
   default     = ""
 }
+
+variable "db_edition" {
+  description = "Edição do Cloud SQL (ENTERPRISE aceita tiers compartilhados)."
+  type        = string
+  default     = "ENTERPRISE"
+}

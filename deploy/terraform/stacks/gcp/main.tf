@@ -130,6 +130,7 @@ resource "google_sql_database_instance" "this" {
   deletion_protection = false
 
   settings {
+    edition           = var.db_edition
     tier              = var.db_instance_class
     disk_size         = var.db_disk_size
     disk_autoresize   = true
@@ -226,6 +227,9 @@ resource "google_service_account_iam_member" "workload_identity" {
   service_account_id = google_service_account.app.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[${var.namespace}/${local.ksa}]"
+
+  # O pool ${project}.svc.id.goog só existe depois que o cluster é criado.
+  depends_on = [google_container_cluster.this]
 }
 
 data "google_project" "this" {}
