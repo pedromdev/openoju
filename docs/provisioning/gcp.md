@@ -21,6 +21,55 @@ O stack cria VPC, GKE (Autopilot ou Standard com node pool `app`), Cloud SQL
 Postgres, bucket GCS com CORS, service account com Workload Identity e HMAC key
 para o SDK S3.
 
+## Custo e tamanhos para validação
+
+O preset padrão cria 2 nós `e2-standard-2` no system e `node_count` nós
+`e2-standard-4`. Para uma validação barata:
+
+```yaml
+system_node_count: 1
+machine_type: e2-standard-2
+node_count: 1
+db_instance: db-f1-micro
+db_authorized_networks: ["0.0.0.0/0"]   # somente validação
+```
+
+Cluster zonal tem control plane gratuito. Cloud SQL `db-f1-micro` é
+shared-core; suficiente para o E2E.
+
+> **Billing:** GKE e Cloud SQL exigem conta de faturamento **aberta**. Contas
+> fechadas aparecem com `open: false` em `gcloud billing accounts list` e o
+> projeto fica com `billingEnabled: false`. Reabra/crie a conta e vincule:
+>
+> ```bash
+> gcloud billing projects link <projeto> --billing-account=<ID>
+> ```
+
+## Artifact Registry
+
+A imagem precisa existir antes do Helm. Crie o repositório e publique:
+
+```bash
+gcloud artifacts repositories create openoju-val \
+  --repository-format=docker --location=us-central1
+gcloud auth configure-docker us-central1-docker.pkg.dev
+IMG=us-central1-docker.pkg.dev/<projeto>/openoju-val/openoju:val
+docker build --platform linux/amd64 -t "$IMG" .
+docker push "$IMG"
+```
+
+No `answers.yaml`:
+
+```yaml
+gcp_gar_repository: openoju-val
+gcp_gar_location: us-central1
+image_repository: us-central1-docker.pkg.dev/<projeto>/openoju-val/openoju
+image_tag: val
+```
+
+O stack concede `roles/artifactregistry.reader` à service account padrão do
+Compute usada pelos nós, então não é preciso `imagePullSecrets`.
+
 ## GCS como S3
 
 O OpenOju usa boto3. O GCS entra pelo modo interoperabilidade:

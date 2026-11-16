@@ -608,6 +608,14 @@ def tfvars_for(answers: dict[str, str]) -> dict:
             data["existing_gar_location"] = answers.get("gcp_gar_location", "")
         if answers.get("gcp_system_node_count"):
             data["system_node_count"] = int(answers["gcp_system_node_count"])
+        if answers.get("gcp_machine_type"):
+            data["machine_type"] = answers["gcp_machine_type"]
+        if answers.get("gcp_db_authorized_networks"):
+            data["db_authorized_networks"] = [
+                item.strip()
+                for item in answers["gcp_db_authorized_networks"].split(",")
+                if item.strip()
+            ]
     if target == "aws":
         data["db_deletion_protection"] = (
             answers.get("db_deletion_protection", "true") == "true"

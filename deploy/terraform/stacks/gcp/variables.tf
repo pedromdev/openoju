@@ -34,9 +34,9 @@ variable "node_count" {
 }
 
 variable "machine_type" {
-  description = "Tipo de máquina dos nós."
+  description = "Tipo de máquina dos nós de aplicação."
   type        = string
-  default     = "e2-standard-4"
+  default     = "e2-standard-2"
 }
 
 variable "db_instance_class" {
