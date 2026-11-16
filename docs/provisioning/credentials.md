@@ -195,53 +195,69 @@ az provider show -n Microsoft.ContainerService --query registrationState -o tsv
 
 ## Magalu Cloud (experimental)
 
-O provider `MagaluCloud/mgc` usa **API key** e, para Object Storage, um
-**key pair** separado.
+A Magalu usa **API key** para a API e um **key pair** para o Object Storage
+(S3). Os dois saem do mesmo fluxo de criação: ao marcar escopos de Object
+Storage, o console mostra o API Key e o Key Pair (ID + Secret).
 
-### 1. API key
+### 1. Criar a API key no console
 
-1. Acesse o console da Magalu Cloud → **IAM / API Keys**.
-2. Crie uma chave com escopos de **Kubernetes (MKE)**, **DBaaS**, **Object
-   Storage**, **Network**, **Block Storage** e **Container Registry**.
-3. Copie a chave na hora da criação (não é exibida depois).
+1. Abra **https://id.magalu.com/api-keys** (Magalu ID) e autentique.
+2. Clique em **Create API Key**.
+3. Nome: `openoju-val`.
+4. Expiração: 30 dias para validação (ou 90 em produção).
+5. Marque as aplicações/escopos:
+   - **MKE (Kubernetes)** — *Resources creation*
+   - **ID Magalu** — *Manage service accounts* (o MKE cria recursos em seu nome)
+   - **DBaaS** — criar instância PostgreSQL
+   - **Object Storage** — *Read* e *Write*
+   - **Network** e **Block Storage** — VPC/subnets e volumes do cluster
+   - **Container Registry** — se for publicar a imagem no registry da Magalu
+6. Copie o **API Key** (aparece uma única vez) e salve o **Key Pair ID** e o
+   **Key Pair Secret** exibidos no mesmo fluxo.
+
+### 2. Exportar no terminal
 
 ```bash
-export TF_VAR_mgc_api_key=...
+umask 077
+cat > ~/.config/openoju-magalu.env <<'ENV'
+export TF_VAR_mgc_api_key='...'
+export TF_VAR_mgc_key_pair_id='...'
+export TF_VAR_mgc_key_pair_secret='...'
+ENV
+chmod 600 ~/.config/openoju-magalu.env
+source ~/.config/openoju-magalu.env
 ```
 
-### 2. Key pair de Object Storage
+O `key_pair_id` é o *access key* do S3 e o secret é a senha; os três valores
+são sensíveis. Nunca versione.
 
-1. Console → **Object Storage** → **Keys** (ou *Credenciais*).
-2. Crie um par de chaves de acesso S3.
-3. Exporte:
-
-```bash
-export TF_VAR_mgc_key_pair_id=...
-export TF_VAR_mgc_key_pair_secret=...
-```
-
-O `key_pair_id` também pode ser respondido no `provision.py init` (vai para o
-`terraform.tfvars`); o secret **só** por ambiente.
-
-### 3. Região
-
-`br-se1` é o padrão do preset. Outras opções: `br-ne1`, `br-mgl1`, `br-mc1`.
-O endpoint S3 segue `https://<região>.magaluobjects.com`.
-
-### Verificação
+### 3. Verificar
 
 ```bash
 terraform -chdir=deploy/terraform/stacks/magalu init -backend=false
 terraform -chdir=deploy/terraform/stacks/magalu plan \
-  -var-file=../../environments/prod/terraform.tfvars
+  -var-file=deploy/environments/val-magalu/terraform.tfvars
 ```
 
-Se a API key estiver inválida, o plan falha com `401` antes de qualquer recurso.
+Uma API key inválida falha com `401` antes de criar qualquer recurso. O
+`provision.py doctor` também exige `TF_VAR_mgc_api_key`.
+
+### 4. CLI (rotação e chaves adicionais)
+
+Depois de ter uma API key válida:
+
+```bash
+mgc auth api-key create --name=openoju-val-2
+mgc auth api-key get <uuid>   # mostra API key e key pair
+```
+
+### Região e endpoint
+
+Regiões: `br-se1` (São Paulo, padrão), `br-ne1`, `br-mgl1`, `br-mc1`.
+O endpoint S3 é `https://<região>.magaluobjects.com`.
 
 > Sem `ReadWriteMany` na Magalu: mantenha `media.mode=emptyDir` e
 > `OJU_STORAGE_BACKEND=s3` (o preset já faz isso).
-
----
 
 ## Depois de criar as credenciais
 
