@@ -7,7 +7,7 @@ release is created, so the ConfigMap/ServiceAccount do not exist yet. Config is
 inlined here and the Secret is created out-of-band in production. When the chart
 generates the Secret itself (dev/minimal), migrations run post-install instead.
 */}}
-{{- $hook := ternary "post-install,pre-upgrade" "pre-install,pre-upgrade" .Values.secrets.create }}
+{{- $hook := ternary "post-install,pre-upgrade" "pre-install,pre-upgrade" (or .Values.postgresql.enabled .Values.secrets.create) }}
 {{- if not .Values.migrations.serviceAccountName }}
 apiVersion: v1
 kind: ServiceAccount
