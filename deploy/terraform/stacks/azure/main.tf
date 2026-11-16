@@ -148,3 +148,52 @@ resource "azurerm_role_assignment" "acr_pull" {
   role_definition_name = "AcrPull"
   principal_id         = azurerm_kubernetes_cluster.this[0].kubelet_identity[0].object_id
 }
+
+resource "random_string" "storage" {
+  length  = 6
+  lower   = true
+  upper   = false
+  numeric = true
+  special = false
+}
+
+locals {
+  storage_account_name = substr(
+    "openoju${replace(lower(var.environment), "-", "")}${random_string.storage.result}",
+    0,
+    24,
+  )
+}
+
+resource "azurerm_storage_account" "media" {
+  name                            = local.storage_account_name
+  resource_group_name             = azurerm_resource_group.this.name
+  location                        = azurerm_resource_group.this.location
+  account_tier                    = "Standard"
+  account_replication_type        = "LRS"
+  min_tls_version                 = "TLS1_2"
+  allow_nested_items_to_be_public = false
+  shared_access_key_enabled       = true
+
+  blob_properties {
+    cors_rule {
+      allowed_origins    = ["https://${var.domain}", "http://localhost:8000", "http://localhost"]
+      allowed_methods    = ["GET", "HEAD", "OPTIONS"]
+      allowed_headers    = ["*"]
+      exposed_headers    = ["*"]
+      max_age_in_seconds = 3600
+    }
+  }
+}
+
+resource "azurerm_storage_container" "media" {
+  name                  = var.storage_container_name
+  storage_account_id    = azurerm_storage_account.media.id
+  container_access_type = "private"
+}
+
+resource "azurerm_role_assignment" "blob" {
+  scope                = azurerm_storage_account.media.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
+}

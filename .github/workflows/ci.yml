@@ -31,6 +31,28 @@ jobs:
       - name: Run wizard tests
         run: pytest scripts/tests -q
 
+  storage-azurite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Start Azurite
+        run: |
+          docker run -d --name azurite -p 10000:10000 \
+            mcr.microsoft.com/azure-storage/azurite:latest \
+            azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+          sleep 3
+      - name: Install dependencies
+        run: pip install -r backend/requirements-dev.txt
+      - name: Storage integration tests
+        env:
+          PYTHONPATH: backend
+          AZURITE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
+        run: pytest backend/tests/test_storage_azurite.py -q
+
   frontend:
     runs-on: ubuntu-latest
     steps:

@@ -2,17 +2,32 @@
 
 AKS + Azure Database for PostgreSQL Flexible Server + MinIO no cluster.
 
-## Por que MinIO
+## Storage: Blob nativo
 
-O Azure Blob Storage não expõe a API S3 que o boto3 consome. Na v1 o MinIO roda
-dentro do cluster com PVC em Azure Disk e o chart cria o bucket. Um backend
-`azure` nativo fica para uma fase posterior.
+O Azure Blob **não é S3**. A aplicação tem um backend nativo `azure`:
 
-Consequências:
+- Terraform cria um Storage Account (LRS, TLS 1.2), um container privado e
+  concede `Storage Blob Data Contributor` à identidade gerenciada do app.
+- No AKS o acesso usa **Workload Identity**: o pod leva o label
+  `azure.workload.identity/use: "true"` e a ServiceAccount tem a anotação
+  `azure.workload.identity/client-id`.
+- Upload em partes usa **staged blocks** (`stage_block` → `commit_block_list`),
+  então continua funcionando com várias réplicas de API.
+- Leitura usa **SAS**: user delegation key (preferido) → account key (fallback)
+  → streaming pela API quando não há SAS (storage privado/RBAC restrito).
+- `storage=bundled` continua subindo MinIO no cluster (laboratório/on-prem).
 
-- `minio.enabled=true` e um Ingress público em `s3.<domínio>` para o presign.
-- O MinIO é single-replica: aceite indisponibilidade durante manutenção do nó.
-- Backup do bucket é responsabilidade sua (`mc mirror` para Blob ou outra conta).
+```yaml
+config:
+  OJU_STORAGE_BACKEND: azure
+  OJU_AZURE_STORAGE_ACCOUNT: <output storage_account>
+  OJU_AZURE_STORAGE_CONTAINER: openoju-media
+  OJU_AZURE_STORAGE_ENDPOINT: https://<account>.blob.core.windows.net
+podLabels:
+  azure.workload.identity/use: "true"
+minio:
+  enabled: false
+```
 
 ## Pré-requisitos
 
@@ -35,13 +50,12 @@ Flexible Server Postgres, e as identidades gerenciadas.
 
 ```yaml
 config:
-  OJU_S3_ENDPOINT: https://s3.<dominio>
-  OJU_S3_INTERNAL_ENDPOINT: http://openoju-openoju-minio:9000
-minio:
-  enabled: true
-  public:
-    enabled: true
-    host: s3.<dominio>
+  OJU_STORAGE_BACKEND: azure
+  OJU_AZURE_STORAGE_ACCOUNT: <storage_account>
+  OJU_AZURE_STORAGE_CONTAINER: openoju-media
+  OJU_AZURE_STORAGE_ENDPOINT: <storage_endpoint>
+podLabels:
+  azure.workload.identity/use: "true"
 ```
 
 ## Cota de vCPU (conta gratuita)

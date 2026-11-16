@@ -45,7 +45,7 @@ service_account_annotations = { "eks.amazonaws.com/role-arn" = "arn:..." }
 | Resposta | Efeito |
 |---|---|
 | `api_replicas > 1` | `OJU_RATE_LIMIT_BACKEND=postgres` + PDB |
-| `storage=managed` | `media.mode=emptyDir` (sem RWX) |
+| `storage=managed` | `media.mode=emptyDir` (sem RWX) e backend nativo (Azure Blob) |
 | `storage=bundled` | MinIO com PVC + Ingress público para presign |
 | `tls=cert-manager` | anotações de issuer e Secret TLS |
 | `vaapi=on` | `hostPath /dev/dri` + `supplementalGroups` |

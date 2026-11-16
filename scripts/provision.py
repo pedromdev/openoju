@@ -75,7 +75,7 @@ TARGETS: dict[str, dict[str, object]] = {
         "terraform": "azure",
         "cloud": True,
         "managed_db": True,
-        "managed_storage": False,
+        "managed_storage": True,
         "vaapi": False,
         "ingress_class": "nginx",
         "node_pool": True,
@@ -450,6 +450,10 @@ def values_for(answers: dict[str, str]) -> dict:
     tls = answers["tls"]
     storage = answers["storage"]
 
+    storage_backend = "s3"
+    if target == "azure" and storage == "managed":
+        storage_backend = "azure"
+
     values: dict = {
         "image": {
             "repository": answers.get("image_repository")
@@ -472,7 +476,7 @@ def values_for(answers: dict[str, str]) -> dict:
             "OJU_FRONTEND_BASE_URL": f"https://{domain}" if tls != "none" else f"http://{domain}",
             "OJU_CORS_ORIGINS": f"https://{domain}" if tls != "none" else f"http://{domain}",
             "OJU_COOKIE_SECURE": "true" if tls != "none" else "false",
-            "OJU_STORAGE_BACKEND": "s3",
+            "OJU_STORAGE_BACKEND": storage_backend,
             "OJU_S3_BUCKET": f"openoju-{answers['environment']}",
             "OJU_S3_CREATE_BUCKET": "false",
             "OJU_RATE_LIMIT_BACKEND": "postgres" if replicas > 1 else "memory",
@@ -534,6 +538,15 @@ def values_for(answers: dict[str, str]) -> dict:
         values["config"]["OJU_S3_ENDPOINT"] = "https://br-se1.magaluobjects.com"
         values["config"]["OJU_S3_INTERNAL_ENDPOINT"] = "https://br-se1.magaluobjects.com"
         values["config"]["OJU_S3_REGION"] = answers["region"]
+
+    if storage_backend == "azure":
+        values["config"].update(
+            {
+                "OJU_AZURE_STORAGE_CONTAINER": "openoju-media",
+                "OJU_AZURE_CREATE_CONTAINER": "true",
+            }
+        )
+        values["podLabels"] = {"azure.workload.identity/use": "true"}
 
     if storage == "bundled":
         values["config"]["OJU_S3_INTERNAL_ENDPOINT"] = (
@@ -651,10 +664,13 @@ def secrets_for(answers: dict[str, str], previous: dict[str, str] | None = None)
         "OJU_FERNET_KEY": previous.get("OJU_FERNET_KEY") or generate_fernet_key(),
         "OJU_SETUP_TOKEN": previous.get("OJU_SETUP_TOKEN") or generate_password(24),
     }
-    # Na AWS o acesso ao S3 vem de IRSA: chaves estáticas no Secret fariam o
-    # boto3 ignorar a role do pod.
-    uses_irsa = answers["target"] == "aws" and answers["storage"] == "managed"
-    if not uses_irsa:
+    # Na AWS (IRSA) e na Azure (Workload Identity) o acesso vem da identidade
+    # do pod; chaves estáticas no Secret quebrariam ou seriam desnecessárias.
+    uses_managed_identity = (
+        answers["storage"] == "managed"
+        and answers["target"] in {"aws", "azure"}
+    )
+    if not uses_managed_identity:
         values["OJU_S3_ACCESS_KEY"] = (
             previous.get("OJU_S3_ACCESS_KEY") or f"oju{secrets.token_hex(8)}"
         )
@@ -700,7 +716,15 @@ def read_outputs(directory: Path) -> dict:
 def write_outputs(directory: Path, outputs: dict) -> None:
     keep = {
         key: outputs[key]
-        for key in ("bucket", "s3_endpoint", "s3_region", "service_account_annotations")
+        for key in (
+            "bucket",
+            "s3_endpoint",
+            "s3_region",
+            "service_account_annotations",
+            "storage_account",
+            "storage_container",
+            "storage_endpoint",
+        )
         if outputs.get(key)
     }
     if keep:

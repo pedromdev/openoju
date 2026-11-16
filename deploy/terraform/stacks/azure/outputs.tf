@@ -34,3 +34,15 @@ output "kubeconfig_command" {
 output "image_registry" {
   value = var.existing_acr_name == "" ? "" : data.azurerm_container_registry.existing[0].login_server
 }
+
+output "storage_account" {
+  value = azurerm_storage_account.media.name
+}
+
+output "storage_container" {
+  value = azurerm_storage_container.media.name
+}
+
+output "storage_endpoint" {
+  value = azurerm_storage_account.media.primary_blob_endpoint
+}

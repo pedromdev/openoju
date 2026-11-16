@@ -124,7 +124,7 @@ O teste consulta `/api/health` de dentro do cluster e aceita `ok` ou
   `idle_timeout` alto para downloads longos.
 - **GCP**: o GCS em modo interoperabilidade exige HMAC keys e
   `addressing_style: path` (já configurado no código). Use `OJU_S3_REGION=auto`.
-- **Azure**: Blob não é S3; o preset sobe MinIO e expõe `minio.public.host`
-  para as URLs assinadas.
+- **Azure**: Blob não é S3; o preset usa o backend nativo `azure` com
+  Workload Identity. `storage=bundled` ainda sobe MinIO para laboratório.
 - **Magalu**: não há RWX; mantenha `media.mode=emptyDir` e
   `OJU_STORAGE_BACKEND=s3`.

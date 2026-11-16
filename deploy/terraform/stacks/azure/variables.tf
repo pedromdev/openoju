@@ -110,3 +110,9 @@ variable "existing_acr_resource_group" {
   type        = string
   default     = ""
 }
+
+variable "storage_container_name" {
+  description = "Container do Azure Blob usado pela aplicação."
+  type        = string
+  default     = "openoju-media"
+}
