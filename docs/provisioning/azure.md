@@ -56,7 +56,10 @@ node_count: 1
 db_instance: B_Standard_B1ms
 ```
 
-Com `Standard_D2ds_v5` em ambos os pools são 4 vCPUs no total. Para produção,
+Com `Standard_D2ds_v4` em ambos os pools são 4 vCPUs no total. Assinaturas de
+avaliação podem não permitir a família `v5` em `brazilsouth` — o erro
+`The VM size ... is not allowed` lista os SKUs válidos; use um deles
+(`Standard_D2ds_v4` costuma estar disponível). Para produção,
 peça aumento em **Subscriptions → Usage + quotas → Total Regional vCPUs**.
 
 ## ACR e imagem

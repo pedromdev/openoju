@@ -590,8 +590,13 @@ def tfvars_for(answers: dict[str, str]) -> dict:
             )
     if target == "gcp" and answers.get("gcp_project"):
         data["project_id"] = answers["gcp_project"]
-    data["db_deletion_protection"] = answers.get("db_deletion_protection", "true") == "true"
-    data["bucket_force_destroy"] = answers.get("bucket_force_destroy", "false") == "true"
+    if target == "aws":
+        data["db_deletion_protection"] = (
+            answers.get("db_deletion_protection", "true") == "true"
+        )
+        data["bucket_force_destroy"] = (
+            answers.get("bucket_force_destroy", "false") == "true"
+        )
     if target == "magalu":
         # Só o ID público; o secret e a API key vêm de TF_VAR_* no ambiente.
         if answers.get("mgc_key_pair_id"):

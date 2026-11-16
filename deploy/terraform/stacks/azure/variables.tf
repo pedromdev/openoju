@@ -36,7 +36,7 @@ variable "node_count" {
 variable "node_vm_size" {
   description = "Tamanho das VMs do pool de aplicação."
   type        = string
-  default     = "Standard_D2ds_v5"
+  default     = "Standard_D2ds_v4"
 }
 
 variable "db_instance_class" {
@@ -85,6 +85,12 @@ variable "cluster_version" {
   description = "Versão do Kubernetes no AKS."
   type        = string
   default     = "1.36"
+}
+
+variable "system_node_vm_size" {
+  description = "Tamanho das VMs do pool de sistema."
+  type        = string
+  default     = "Standard_D2ds_v4"
 }
 
 variable "system_node_count" {
