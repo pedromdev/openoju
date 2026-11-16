@@ -9,6 +9,18 @@ GKE + Cloud SQL + GCS (modo interoperabilidade) + GCLB.
 - Terraform >= 1.7, `helm`, `kubectl`.
 - IP global estático e certificado gerenciado para o Ingress.
 
+## Plugin de autenticação do GKE
+
+`kubectl` no GKE usa o plugin `gke-gcloud-auth-plugin`:
+
+```bash
+gcloud components install gke-gcloud-auth-plugin
+```
+
+Sem ele, `gcloud container clusters get-credentials` funciona mas qualquer
+comando `kubectl` falha com `ACTION REQUIRED: gke-gcloud-auth-plugin ...`.
+O `provision.py doctor` verifica a presença do plugin.
+
 ## Infraestrutura
 
 ```bash

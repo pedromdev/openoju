@@ -928,6 +928,9 @@ def doctor(answers: dict[str, str]) -> list[str]:
     cloud_cli = {"aws": "aws", "gcp": "gcloud", "azure": "az"}
     if target in cloud_cli:
         required.append(cloud_cli[target])
+    if target == "gcp":
+        # kubectl usa este plugin para autenticar no GKE.
+        required.append("gke-gcloud-auth-plugin")
 
     print("Ferramentas")
     for binary in required:
