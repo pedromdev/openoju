@@ -42,12 +42,20 @@ O provider 0.56 pagina `instance-types` até um offset que a API rejeita com
 paginação, informe explicitamente:
 
 ```yaml
-db_engine_version: "17"                        # postgresql 15/16/17 ACTIVE
-db_instance: cloud-dbas-pgs-bv-i1-c1-r4-d10    # 1 vCPU / 4 GB, SINGLE_INSTANCE
+db_engine_version: "17"      # postgresql 15/16/17 ACTIVE
+db_instance: BV1-4-10        # label do tipo (1 vCPU / 4 GB), não o name
 ```
 
 O stack pula os data sources quando os valores estão preenchidos. Mantenha
-`db_engine_name: postgresql` (default). Os tipos antigos (`i0-*`,
+`db_engine_name: postgresql` (default).
+
+**Atenção ao `db_instance`:** o provider compara o campo `label`, não o `name`.
+Para `cloud-dbas-pgs-bv-i1-c1-r4-d10` o label é `BV1-4-10`. Liste com:
+
+```bash
+mgc dbaas instance-types list \
+  --engine-id <uuid-do-postgres> --status ACTIVE --compatible-product SINGLE_INSTANCE
+``` Os tipos antigos (`i0-*`,
 `cloud-dbaas-bs1.*`) estão `DEPRECATED`; confirme com
 `mgc dbaas instance-types list --engine-id <uuid> --status ACTIVE`.
 
