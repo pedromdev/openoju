@@ -26,8 +26,15 @@
 
 ## Credenciais por nuvem
 
-O wizard não guarda segredo em `answers.yaml`. Ele espera as credenciais no
-ambiente:
+O wizard não guarda segredo em `answers.yaml`. Ele carrega
+`.secrets/<alvo>.env` automaticamente (veja `credentials.md`) e usa variáveis
+já definidas no shell com prioridade. Para desligar o auto-load:
+
+```bash
+python3 scripts/provision.py apply --env prod --no-credentials
+```
+
+Variáveis esperadas por alvo:
 
 | Alvo | Variáveis |
 |---|---|

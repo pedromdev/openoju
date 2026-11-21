@@ -35,6 +35,7 @@ CHART = DEPLOY / "helm" / "openoju"
 TERRAFORM = DEPLOY / "terraform" / "stacks"
 
 STATE_SCHEMA = 1
+SECRETS_DIR = ROOT / ".secrets"
 
 TARGETS: dict[str, dict[str, object]] = {
     "local": {
@@ -318,14 +319,15 @@ def default_answers(name: str, target: str) -> dict[str, str]:
         "registry": "ghcr",
         "cluster_mode": "create" if spec["cloud"] else "existing",
         "region": {
-            "aws": "us-east-1",
+            "aws": os.environ.get("AWS_REGION") or "us-east-1",
             "gcp": "us-central1",
             "azure": "brazilsouth",
             "magalu": "br-se1",
         }.get(target, ""),
         "node_count": "2",
-        "gcp_project": "",
-        "azure_subscription": "",
+        "gcp_project": os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("TF_VAR_project_id", ""),
+        "azure_subscription": os.environ.get("AZURE_SUBSCRIPTION_ID", ""),
         "azure_acr_name": "",
         "azure_acr_resource_group": "",
         "gcp_gar_repository": "",
@@ -787,6 +789,42 @@ def render_environment(answers: dict[str, str], *, force: bool = False) -> Path:
     return directory
 
 
+def load_cloud_credentials(target: str, *, enabled: bool = True) -> Path | None:
+    """Carrega .secrets/<target>.env sem sobrescrever o ambiente atual."""
+    if not enabled or target not in {"aws", "azure", "gcp", "magalu"}:
+        return None
+    path = SECRETS_DIR / f"{target}.env"
+    if not path.exists():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :]
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    return path
+
+
+def apply_env_defaults(answers: dict[str, str]) -> None:
+    """Completa respostas com identificadores vindos do ambiente."""
+    target = answers.get("target")
+    if target == "aws" and not answers.get("region"):
+        answers["region"] = os.environ.get("AWS_REGION") or "us-east-1"
+    if target == "azure" and not answers.get("azure_subscription"):
+        answers["azure_subscription"] = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
+    if target == "gcp" and not answers.get("gcp_project"):
+        answers["gcp_project"] = os.environ.get(
+            "GOOGLE_CLOUD_PROJECT"
+        ) or os.environ.get("TF_VAR_project_id", "")
+
+
 def read_env_file(path: Path) -> dict[str, str]:
     data: dict[str, str] = {}
     if not path.exists():
@@ -1040,6 +1078,22 @@ def doctor(answers: dict[str, str]) -> list[str]:
             problems.append(f"stack Terraform ausente: {stack.relative_to(ROOT)}")
         else:
             print(f"  stack Terraform: {stack.relative_to(ROOT)}")
+    print("\nCredenciais locais")
+    secrets_dir = SECRETS_DIR
+    if secrets_dir.exists():
+        mode = oct(secrets_dir.stat().st_mode)[-3:]
+        print(f"  .secrets: permissão {mode}")
+        if mode != "700":
+            problems.append("chmod 700 .secrets")
+    target_secrets = secrets_dir / f"{answers['target']}.env"
+    if target_secrets.exists():
+        mode = oct(target_secrets.stat().st_mode)[-3:]
+        print(f"  {target_secrets.name}: permissão {mode}")
+        if mode != "600":
+            problems.append(f"chmod 600 {target_secrets.relative_to(ROOT)}")
+    else:
+        print(f"  {target_secrets.name}: ausente (usando variáveis do ambiente)")
+
     print("\nCredenciais")
     for problem in check_credentials(answers):
         problems.append(problem)
@@ -1096,6 +1150,9 @@ def action_init(args: argparse.Namespace) -> int:
         if not prompter.confirm(f"Ambiente {args.env} já existe. Sobrescrever?", False):
             print("nada a fazer")
             return 0
+    existing = read_yaml_like(directory / "answers.yaml")
+    target = args.target or existing.get("target") or "local"
+    load_cloud_credentials(target, enabled=not args.no_credentials)
     answers = collect_answers(args, prompter)
     directory = render_environment(answers, force=True)
     print(f"\nambiente gerado em {directory.relative_to(ROOT)}")
@@ -1139,6 +1196,8 @@ def terraform_stack(answers: dict[str, str]) -> Path | None:
 def action_plan(args: argparse.Namespace) -> int:
     answers = load_answers(args.env)
     directory = env_dir(args.env)
+    load_cloud_credentials(answers["target"], enabled=not args.no_credentials)
+    apply_env_defaults(answers)
     stack = terraform_stack(answers)
     if stack is not None:
         if not stack.exists():
@@ -1388,6 +1447,11 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--env", "-e", default="dev", help="nome do ambiente")
         p.add_argument("--yes", "-y", action="store_true", help="não interativo")
         p.add_argument("--verbose", "-v", action="store_true", help="saída detalhada")
+        p.add_argument(
+            "--no-credentials",
+            action="store_true",
+            help="não carregar .secrets/<alvo>.env automaticamente",
+        )
 
     p_init = sub.add_parser("init", help="perguntas e geração do ambiente")
     add_env(p_init)

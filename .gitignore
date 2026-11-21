@@ -18,3 +18,6 @@ deploy/environments/
 *.tfstate
 *.tfstate.*
 crash.log
+
+# Credenciais locais de validação (nunca versionar)
+.secrets/

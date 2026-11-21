@@ -11,6 +11,22 @@ Azure    -> ARM_CLIENT_ID / ARM_CLIENT_SECRET / ARM_TENANT_ID / ARM_SUBSCRIPTION
 Magalu   -> TF_VAR_mgc_api_key (+ TF_VAR_mgc_key_pair_id/secret)
 ```
 
+## Forma rápida (recomendada)
+
+```bash
+./scripts/cloud-setup.sh --cloud aws      # ou azure | gcp | magalu
+eval "$(./scripts/cloud-env.sh aws)"      # opcional: exporta no shell atual
+./scripts/cloud-setup.sh --check          # permissões + login
+```
+
+Os valores ficam em `.secrets/<nuvem>.env` (diretório 700, arquivos 600, no
+`.gitignore`). O `provision.py` carrega esse arquivo automaticamente pelo alvo
+do ambiente; use `--no-credentials` para desligar. Nada é impresso em claro.
+
+> O CI **nunca** recebe essas credenciais: os jobs usam SQLite, Azurite e
+> `kind`. Há um teste de guarda que falha se um workflow referenciar
+> credenciais de nuvem.
+
 Antes de começar:
 
 - Use uma conta/projeto **dedicado** ao OpenOju. É mais fácil destruir e evita

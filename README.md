@@ -34,6 +34,11 @@ python3 scripts/provision.py apply  --env prod
 Detalhes em [`deploy/README.md`](deploy/README.md) e
 [`docs/provisioning/`](docs/provisioning/README.md).
 
+Para validar em nuvem localmente, configure as credenciais uma vez
+(`./scripts/cloud-setup.sh --cloud aws`) e rode o E2E contra um ambiente já
+provisionado (`./scripts/cloud-e2e.sh aws val`). O CI não usa credenciais de
+nuvem.
+
 > O `docker-compose.yml` é apenas para desenvolvimento local: ele assume rede
 > `proxy` do host, bind mounts em `/srv/openoju` e `/dev/dri`. Produção é
 > Kubernetes.

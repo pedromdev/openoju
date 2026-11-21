@@ -5,6 +5,7 @@ ENV ?= dev
 HELM ?= helm
 
 .PHONY: install api worker ui test e2e sample build-ui docker-build docker-up docker-down docker-logs migrate revision \
+	cloud-setup cloud-check cloud-env cloud-e2e \
 	provision-init provision-doctor provision-plan provision-apply helm-lint helm-template test-provision
 
 install:
@@ -73,3 +74,16 @@ helm-lint:
 
 helm-template:
 	$(HELM) template openoju deploy/helm/openoju -f deploy/helm/openoju/values-minimal.yaml
+
+# Credenciais locais (ficam em .secrets/, nunca versionadas)
+cloud-setup:
+	./scripts/cloud-setup.sh
+
+cloud-check:
+	./scripts/cloud-setup.sh --check
+
+cloud-env:
+	./scripts/cloud-env.sh $(CLOUD)
+
+cloud-e2e:
+	./scripts/cloud-e2e.sh $(CLOUD) $(ENV)
