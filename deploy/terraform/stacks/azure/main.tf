@@ -197,3 +197,10 @@ resource "azurerm_role_assignment" "blob" {
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_user_assigned_identity.app.principal_id
 }
+
+# Necessária para emitir user delegation SAS (URLs de leitura).
+resource "azurerm_role_assignment" "blob_delegator" {
+  scope                = azurerm_storage_account.media.id
+  role_definition_name = "Storage Blob Delegator"
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
+}
