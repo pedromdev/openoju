@@ -1,0 +1,79 @@
+# =============================================================================
+# On-premise (k3s/RKE2/Talos/kubeadm): Postgres e MinIO embutidos, VAAPI ligado.
+#
+# Pré-requisitos:
+#   - ingress-nginx (ou outro controller) e cert-manager para TLS
+#   - storageClass com suporte a RWO para Postgres/MinIO
+#   - RWX (Longhorn/NFS/cephfs) para media quando storage_backend=local
+#   - nós com /dev/dri para acelerar o ffmpeg
+# =============================================================================
+
+replicaCount:
+  api: 2
+  worker: 2
+  dispatcher: 1
+  maintenance: 1
+
+secrets:
+  create: true
+
+config:
+  OJU_PUBLIC_BASE_URL: https://openoju.example.com
+  OJU_FRONTEND_BASE_URL: https://openoju.example.com
+  OJU_CORS_ORIGINS: https://openoju.example.com
+  OJU_STORAGE_BACKEND: s3
+  OJU_S3_ENDPOINT: https://s3.openoju.example.com
+  OJU_S3_INTERNAL_ENDPOINT: http://openoju-openoju-minio:9000
+  OJU_S3_BUCKET: openoju
+  OJU_S3_CREATE_BUCKET: "false"
+  OJU_RATE_LIMIT_BACKEND: postgres
+
+postgresql:
+  enabled: true
+  persistence:
+    size: 50Gi
+
+minio:
+  enabled: true
+  persistence:
+    size: 500Gi
+  public:
+    enabled: true
+    host: s3.openoju.example.com
+    className: nginx
+    tlsSecret: openoju-minio-tls
+
+media:
+  mode: emptyDir
+  emptyDir:
+    sizeLimit: 50Gi
+
+data:
+  mode: emptyDir
+
+vaapi:
+  enabled: true
+  device: /dev/dri
+  groupAdd: [110]
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: openoju.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts: [openoju.example.com]
+      secretName: openoju-tls
+
+pdb:
+  enabled: true
+
+networkPolicy:
+  enabled: false

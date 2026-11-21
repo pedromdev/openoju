@@ -13,6 +13,36 @@ webhooks assinados, retenção e fluxos LGPD/Marco Civil. Licença Apache-2.0.
 > **Sobre o nome** — *Ojú* é uma palavra iorubá para “olhos” ou “face”. O nome é
 > uma referência cultural à ideia de observação atenta.
 
+## Como rodar
+
+| Cenário | Caminho |
+|---|---|
+| Avaliar localmente com Docker | `docker compose up -d --build` |
+| Kubernetes local (kind/k3d) | `python3 scripts/provision.py init --env local --target local` |
+| On-premise (k3s/RKE2/Talos) | `deploy/helm/openoju/values-onprem.yaml` |
+| AWS / GCP / Azure / Magalu | `python3 scripts/provision.py init --env prod --target <nuvem>` |
+
+O wizard pergunta o alvo, o banco, o object storage, o TLS e o SSO, gera
+`values.yaml`, `terraform.tfvars`, o Secret e um `runbook.md`. Depois:
+
+```bash
+python3 scripts/provision.py doctor --env prod
+python3 scripts/provision.py plan   --env prod
+python3 scripts/provision.py apply  --env prod
+```
+
+Detalhes em [`deploy/README.md`](deploy/README.md) e
+[`docs/provisioning/`](docs/provisioning/README.md).
+
+Para validar em nuvem localmente, configure as credenciais uma vez
+(`./scripts/cloud-setup.sh --cloud aws`) e rode o E2E contra um ambiente já
+provisionado (`./scripts/cloud-e2e.sh aws val`). O CI não usa credenciais de
+nuvem.
+
+> O `docker-compose.yml` é apenas para desenvolvimento local: ele assume rede
+> `proxy` do host, bind mounts em `/srv/openoju` e `/dev/dri`. Produção é
+> Kubernetes.
+
 ## O que está implementado
 
 ### Catálogo e análise

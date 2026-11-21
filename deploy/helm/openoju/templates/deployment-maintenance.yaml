@@ -18,30 +18,32 @@ spec:
         app.kubernetes.io/name: {{ include "openoju.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: maintenance
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
+      serviceAccountName: {{ include "openoju.serviceAccountName" . }}
+      {{- include "openoju.imagePullSecrets" . | nindent 6 }}
       securityContext:
-        {{- toYaml .Values.securityContext | nindent 8 }}
+        {{- include "openoju.podSecurityContext" . | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       containers:
         - name: maintenance
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          image: "{{ include "openoju.image" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["python", "-m", "app.maintenance"]
-          envFrom:
-            - configMapRef:
-                name: {{ include "openoju.configMapName" . }}
-            - secretRef:
-                name: {{ .Values.existingSecret }}
+          {{- include "openoju.env" . | nindent 10 }}
           volumeMounts:
-            - name: data
-              mountPath: /app/data
-            - name: media
-              mountPath: /media
+            {{- include "openoju.volumeMounts" . | nindent 12 }}
           resources:
             {{- toYaml .Values.resources.maintenance | nindent 12 }}
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: {{ include "openoju.dataClaim" . }}
-        - name: media
-          persistentVolumeClaim:
-            claimName: {{ include "openoju.mediaClaim" . }}
+        {{- include "openoju.volumes" . | nindent 8 }}
+      {{- include "openoju.scheduling" . | nindent 6 }}

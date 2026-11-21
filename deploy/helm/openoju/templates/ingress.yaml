@@ -1,8 +1,13 @@
 {{- if .Values.ingress.enabled }}
+{{- $name := include "openoju.fullname" . }}
+{{- $hosts := .Values.ingress.hosts }}
+{{- if and (not $hosts) .Values.ingress.host }}
+{{- $hosts = list (dict "host" .Values.ingress.host "paths" (list (dict "path" "/" "pathType" "Prefix"))) }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "openoju.fullname" . }}
+  name: {{ $name }}
   labels:
     {{- include "openoju.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
@@ -14,19 +19,29 @@ spec:
   ingressClassName: {{ .Values.ingress.className }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.host }}
+    {{- range $hosts }}
+    - host: {{ .host }}
       http:
         paths:
-          - path: /
-            pathType: Prefix
+          {{- range (.paths | default (list (dict "path" "/" "pathType" "Prefix"))) }}
+          - path: {{ .path }}
+            pathType: {{ .pathType | default "Prefix" }}
             backend:
               service:
-                name: {{ include "openoju.fullname" . }}
+                name: {{ $name }}
                 port:
-                  number: {{ .Values.service.port }}
-  {{- if .Values.ingress.tlsSecret }}
+                  number: {{ $.Values.service.port }}
+          {{- end }}
+    {{- end }}
+  {{- if .Values.ingress.tls }}
   tls:
-    - hosts: [{{ .Values.ingress.host }}]
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
+  {{- else if .Values.ingress.tlsSecret }}
+  tls:
+    - hosts:
+        {{- range $hosts }}
+        - {{ .host }}
+        {{- end }}
       secretName: {{ .Values.ingress.tlsSecret }}
   {{- end }}
 {{- end }}

@@ -31,6 +31,7 @@ from ..schemas import (
 from ..services.ffmpeg import FfmpegError
 from ..services.ingest import import_path, save_upload
 from ..services.jobs import enqueue_video
+from ..services.media import remote_media_response
 from ..services.serializers import event_out, job_out, video_out
 from ..storage import get_storage
 from ..tenancy import AuthPrincipal, log_access, scoped_get, scoped_query
@@ -285,8 +286,8 @@ def stream_video(
         request=request,
         commit=True,
     )
-    if video.proxy_storage_key and video.storage_backend == "s3":
-        return RedirectResponse(get_storage().presign_get(video.proxy_storage_key), status_code=302)
+    if video.proxy_storage_key and video.storage_backend != "local":
+        return remote_media_response(video.proxy_storage_key, "video/mp4")
     path = Path(video.proxy_path or "")
     if not path.exists():
         raise HTTPException(status_code=404, detail="proxy não encontrado no disco")
@@ -302,8 +303,10 @@ def video_thumbnail(
     db: Session = Depends(get_db),
 ) -> FileResponse:
     video = scoped_get(db, Video, principal.organization_id or "", video_id, detail="vídeo não encontrado")
-    if video.thumbnail_storage_key and video.storage_backend == "s3":
-        return RedirectResponse(get_storage().presign_get(video.thumbnail_storage_key), status_code=302)
+    if video.thumbnail_storage_key and video.storage_backend != "local":
+        return remote_media_response(
+            video.thumbnail_storage_key, "image/jpeg", headers={"Cache-Control": "no-cache"}
+        )
     path = Path(video.thumbnail_path) if video.thumbnail_path else None
     if path is None or not path.exists():
         event = (

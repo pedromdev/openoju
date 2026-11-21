@@ -70,7 +70,9 @@ class Settings(BaseSettings):
     fernet_key: str = ""
     public_base_url: str = "http://localhost:8000"
 
-    # Login rate limiting (in-process; document single-replica limitation)
+    # Login rate limiting. "memory" is fine for a single API process;
+    # "postgres" shares the window across replicas.
+    rate_limit_backend: str = "memory"
     login_rate_limit_attempts: int = 10
     login_rate_limit_window_s: int = 300
 
@@ -84,6 +86,29 @@ class Settings(BaseSettings):
     s3_region: str = "us-east-1"
     s3_part_size: int = 16 * 1024 * 1024
     s3_presign_expires_s: int = 86400
+    # Managed buckets are usually pre-created by IaC without CreateBucket
+    # permission; keep this off there.
+    s3_create_bucket: bool = True
+    # Compatibilidade com S3-like (R2/B2/Wasabi): path|virtual|auto e a versão
+    # de assinatura mudam conforme o provedor.
+    s3_addressing_style: str = "path"
+    s3_signature_version: str = "s3v4"
+    # when_required evita x-amz-checksum-* (GCS rejeita); when_supported usa o
+    # padrão novo do botocore.
+    s3_checksums: str = "when_required"
+
+    # Azure Blob Storage (backend nativo, não é S3)
+    azure_storage_account: str = ""
+    azure_storage_container: str = "openoju-media"
+    azure_storage_endpoint: str = ""
+    # Host que o navegador alcança (CDN/proxy); vazio usa o endpoint da conta.
+    azure_storage_public_endpoint: str = ""
+    # Azurite/dev ou ambiente sem Workload Identity.
+    azure_storage_connection_string: str = ""
+    azure_storage_account_key: str = ""
+    azure_create_container: bool = True
+    azure_block_size: int = 8 * 1024 * 1024
+    azure_presign_expires_s: int = 86400
 
     # OIDC (phase 4). Kept here so setup status can advertise availability.
     oidc_enabled: bool = False
@@ -132,6 +157,32 @@ class Settings(BaseSettings):
         return self.data_dir / "jobs"
 
     @property
+    def uses_object_storage(self) -> bool:
+        return self.storage_backend.lower() != "local"
+
+    @property
+    def storage_presigned_parts(self) -> bool:
+        # Só o S3 expõe URLs por parte; Azure usa staged blocks via API.
+        return self.storage_backend.lower() == "s3"
+
+    @property
+    def storage_part_size(self) -> int:
+        backend = self.storage_backend.lower()
+        if backend == "s3":
+            return max(1, int(self.s3_part_size))
+        if backend == "azure":
+            return max(1, int(self.azure_block_size))
+        return max(1, int(self.upload_chunk_size))
+
+    @property
+    def azure_endpoint(self) -> str:
+        if self.azure_storage_endpoint:
+            return self.azure_storage_endpoint.rstrip("/")
+        if self.azure_storage_account:
+            return f"https://{self.azure_storage_account}.blob.core.windows.net"
+        return ""
+
+    @property
     def effective_watch_dir(self) -> Path:
         return self.watch_dir or (self.media_root / "inbox")
 
@@ -172,6 +223,9 @@ class Settings(BaseSettings):
 
     def storage_key(self, organization_id: str, kind: str, name: str) -> str:
         return f"org/{organization_id}/{kind}/{name}"
+
+    def job_log_key(self, organization_id: str, job_id: str) -> str:
+        return f"org/{organization_id}/logs/{job_id}.log"
 
     def ensure_dirs(self) -> None:
         for path in (

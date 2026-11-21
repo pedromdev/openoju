@@ -40,7 +40,7 @@ from ..security import (
     constant_time_equal,
     hash_password,
     hash_token,
-    login_limiter,
+    limiter_for,
     new_session_token,
     normalize_email,
     session_expiry,
@@ -181,7 +181,9 @@ def login(
     email = normalize_email(str(payload.email))
     ip = client_ip(request) or "unknown"
     limiter_key = f"{ip}:{email}"
-    if login_limiter.blocked(
+    limiter = limiter_for(settings)
+    if limiter.blocked(
+        db,
         limiter_key,
         attempts=settings.login_rate_limit_attempts,
         window_s=settings.login_rate_limit_window_s,
@@ -192,7 +194,7 @@ def login(
 
     user = db.query(User).filter(User.email == email).one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
-        login_limiter.hit(limiter_key, window_s=settings.login_rate_limit_window_s)
+        limiter.hit(db, limiter_key, window_s=settings.login_rate_limit_window_s)
         log_audit(
             db,
             organization_id=None,
@@ -204,7 +206,7 @@ def login(
         raise HTTPException(status_code=401, detail="credenciais inválidas")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="usuário desativado")
-    login_limiter.reset(limiter_key)
+    limiter.reset(db, limiter_key)
     session, token, csrf = _create_session(db, request, user)
     set_session_cookies(response, token, csrf)
     organization = None

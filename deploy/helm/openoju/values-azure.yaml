@@ -1,0 +1,73 @@
+# =============================================================================
+# Azure: AKS + Azure Database for PostgreSQL + Azure Blob Storage
+#
+# O Blob não é S3: a aplicação usa o backend nativo `azure`. A imagem é
+# publicada em qualquer registry acessível (ACR/ghcr/...).
+# =============================================================================
+
+replicaCount:
+  api: 2
+  worker: 2
+  dispatcher: 1
+  maintenance: 1
+
+serviceAccount:
+  create: true
+  annotations:
+    # Preenchido pelo Terraform (wizard injeta o client-id da identidade).
+    azure.workload.identity/client-id: ""
+
+# O webhook do Workload Identity exige o label no pod.
+podLabels:
+  azure.workload.identity/use: "true"
+
+secrets:
+  create: false
+
+config:
+  OJU_PUBLIC_BASE_URL: https://openoju.example.com
+  OJU_FRONTEND_BASE_URL: https://openoju.example.com
+  OJU_CORS_ORIGINS: https://openoju.example.com
+  OJU_STORAGE_BACKEND: azure
+  OJU_AZURE_STORAGE_ACCOUNT: ""          # output `storage_account`
+  OJU_AZURE_STORAGE_CONTAINER: openoju-media
+  OJU_AZURE_STORAGE_ENDPOINT: ""         # output `storage_endpoint`
+  OJU_AZURE_CREATE_CONTAINER: "true"
+  OJU_AZURE_BLOCK_SIZE: "8388608"
+  OJU_RATE_LIMIT_BACKEND: postgres
+
+media:
+  mode: emptyDir
+  emptyDir:
+    sizeLimit: 50Gi
+
+data:
+  mode: emptyDir
+
+vaapi:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+  hosts:
+    - host: openoju.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts: [openoju.example.com]
+      secretName: openoju-tls
+
+pdb:
+  enabled: true
+
+nodeSelector:
+  openoju.io/pool: app
+
+networkPolicy:
+  enabled: true
+  allowDNS: true

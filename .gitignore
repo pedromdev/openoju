@@ -11,3 +11,13 @@ frontend/.angular/
 *.log
 
 docker-compose.override.yml
+deploy/environments/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Credenciais locais de validação (nunca versionar)
+.secrets/

@@ -1,3 +1,16 @@
+# =============================================================================
+# OpenOju — valores padrão
+#
+# O chart é agnóstico de nuvem: banco e object storage são externos por padrão
+# (RDS/Cloud SQL/Flexible/DBaaS + S3/GCS/Object Storage). Para um cluster de
+# máquina única use os blocos `postgresql.enabled` e `minio.enabled`.
+#
+# Presets prontos em values-{minimal,onprem,aws,gcp,azure,magalu}.yaml.
+# =============================================================================
+
+nameOverride: ""
+fullnameOverride: ""
+
 replicaCount:
   api: 1
   worker: 1
@@ -8,17 +21,26 @@ image:
   repository: ghcr.io/pedromdev/openoju
   tag: "0.3.0"
   pullPolicy: IfNotPresent
+  # Secrets no namespace do release com as mesmas credenciais do registry.
+  pullSecrets: []
 
-# Create with:
-# kubectl create secret generic openoju-secrets \
-#   --from-literal=OJU_DATABASE_URL=... \
-#   --from-literal=OJU_SECRET_KEY=... \
-#   --from-literal=OJU_FERNET_KEY=... \
-#   --from-literal=OJU_SETUP_TOKEN=... \
-#   --from-literal=OJU_S3_ACCESS_KEY=... \
-#   --from-literal=OJU_S3_SECRET_KEY=... \
-#   --from-literal=OJU_OIDC_CLIENT_SECRET=...
+serviceAccount:
+  create: true
+  name: ""
+  # Ex.: eks.amazonaws.com/role-arn=<irsa-role> (AWS)
+  #      iam.gke.io/gcp-service-account=<gsa>@<project>.iam.gserviceaccount.com (GCP)
+  #      azure.workload.identity/client-id=<client-id> (Azure)
+  annotations: {}
+
+# Nome do Secret com OJU_DATABASE_URL, OJU_SECRET_KEY, OJU_FERNET_KEY,
+# OJU_SETUP_TOKEN e credenciais S3. Use `secrets.create` apenas em dev.
 existingSecret: openoju-secrets
+
+secrets:
+  create: false
+  annotations: {}
+  # Usado apenas quando create=true e OJU_DATABASE_URL não existe no Secret.
+  databaseUrl: ""
 
 config:
   OJU_DATA_DIR: /app/data
@@ -30,11 +52,12 @@ config:
   OJU_CSRF_ENABLED: "true"
   OJU_SESSION_TTL_HOURS: "720"
   OJU_STORAGE_BACKEND: s3
-  OJU_S3_ENDPOINT: https://s3.openoju.example.com
-  OJU_S3_INTERNAL_ENDPOINT: http://minio.minio.svc.cluster.local:9000
+  OJU_S3_ENDPOINT: https://s3.example.com
+  OJU_S3_INTERNAL_ENDPOINT: ""
   OJU_S3_BUCKET: openoju
   OJU_S3_REGION: us-east-1
   OJU_S3_PART_SIZE: "16777216"
+  OJU_S3_CREATE_BUCKET: "false"
   OJU_OIDC_ENABLED: "false"
   OJU_OIDC_ISSUER: ""
   OJU_OIDC_CLIENT_ID: ""
@@ -45,29 +68,146 @@ config:
   OJU_WEBHOOK_ALLOW_HTTP: "false"
   OJU_DISPATCHER_INTERVAL_S: "10"
   OJU_MAINTENANCE_INTERVAL_S: "3600"
+  # "postgres" é obrigatório quando replicaCount.api > 1.
+  OJU_RATE_LIMIT_BACKEND: memory
+
+extraEnv: []
+extraEnvFrom: []
+
+podAnnotations: {}
+podLabels: {}
+
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  runAsNonRoot: true
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+vaapi:
+  # Somente on-premise com /dev/dri disponível.
+  enabled: false
+  device: /dev/dri
+  groupAdd: []
+
+migrations:
+  enabled: true
+  # Vazio cria uma ServiceAccount de hook (pre-install), porque a ServiceAccount
+  # do chart ainda não existe quando o hook roda.
+  serviceAccountName: ""
+  annotations: {}
+  backoffLimit: 6
+  activeDeadlineSeconds: 900
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 media:
+  # "pvc" para backend local; "emptyDir" para S3/GCS/Object Storage.
+  mode: pvc
   existingClaim: ""
   size: 100Gi
   storageClassName: ""
   accessMode: ReadWriteMany
+  emptyDir:
+    sizeLimit: 20Gi
 
 data:
+  # Logs de job vão para object storage quando OJU_STORAGE_BACKEND=s3,
+  # então "emptyDir" é suficiente e dispensa RWX.
+  mode: pvc
   existingClaim: ""
   size: 10Gi
   storageClassName: ""
   accessMode: ReadWriteMany
+  emptyDir:
+    sizeLimit: 1Gi
 
 service:
   type: ClusterIP
   port: 8000
+  annotations: {}
 
 ingress:
   enabled: false
-  className: nginx
-  host: openoju.example.com
-  tlsSecret: ""
+  className: ""
   annotations: {}
+  # Preferencial. Mantém `host` por compatibilidade.
+  hosts: []
+  host: ""
+  tlsSecret: ""
+  tls: []
+
+# Postgres embutido (StatefulSet) para clusters de máquina única.
+# Requer OJU_DATABASE_URL no Secret apontando para este Service.
+postgresql:
+  enabled: false
+  image: postgres:16-alpine
+  imagePullPolicy: IfNotPresent
+  serviceName: ""
+  auth:
+    username: openoju
+    database: openoju
+    # Nome da chave no Secret com a senha do role.
+    passwordKey: postgres-password
+  persistence:
+    size: 20Gi
+    storageClassName: ""
+    existingClaim: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# MinIO embutido para clusters sem object storage gerenciado.
+# Requer OJU_S3_* no ConfigMap apontando para este Service e as chaves no Secret.
+minio:
+  enabled: false
+  image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+  imagePullPolicy: IfNotPresent
+  command: ["minio", "server", "/data", "--console-address", ":9001"]
+  serviceName: ""
+  accessKeyKey: OJU_S3_ACCESS_KEY
+  secretKeyKey: OJU_S3_SECRET_KEY
+  persistence:
+    # "pvc" para produção; "emptyDir" para CI/laboratório (efêmero).
+    mode: pvc
+    size: 100Gi
+    storageClassName: ""
+    existingClaim: ""
+    emptyDir:
+      medium: Memory
+      sizeLimit: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  # Cria o bucket e aplica CORS na primeira instalação.
+  initBucket:
+    enabled: true
+    image: pgsty/mc:RELEASE.2026-11-12T00-00-00Z
+  # Expõe o MinIO em um host público: as URLs assinadas usam OJU_S3_ENDPOINT,
+  # que precisa ser resolvível pelo navegador.
+  public:
+    enabled: false
+    host: ""
+    className: ""
+    annotations: {}
+    tlsSecret: ""
 
 resources:
   api:
@@ -99,11 +239,40 @@ resources:
       cpu: 500m
       memory: 512Mi
 
-securityContext:
-  runAsUser: 1000
-  runAsGroup: 1000
-  fsGroup: 1000
+probes:
+  api:
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 3
+    liveness:
+      initialDelaySeconds: 20
+      periodSeconds: 30
+      failureThreshold: 3
+  worker:
+    liveness:
+      initialDelaySeconds: 30
+      periodSeconds: 60
+      failureThreshold: 5
+
+pdb:
+  enabled: false
+  api:
+    minAvailable: 1
+  worker:
+    minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  # Libera entrada apenas do controller de ingress.
+  ingressNamespaceSelector: {}
+  allowDNS: true
+  extraEgress: []
 
 nodeSelector: {}
 tolerations: []
 affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+
+terminationGracePeriodSeconds: 30

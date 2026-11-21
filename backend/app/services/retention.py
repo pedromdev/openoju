@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from ..models import (
     AccessLog,
     AuditLog,
     Event,
+    Job,
     LegalHold,
+    LoginAttempt,
     PrivacySettings,
     Session as AuthSession,
     Video,
@@ -42,7 +45,7 @@ def _active_holds(db: Session, organization_id: str, now: datetime) -> set[tuple
 
 
 def _delete_video_media(db: Session, video: Video, settings: Settings) -> int:
-    storage = get_storage(settings) if settings.storage_backend == "s3" else None
+    storage = get_storage(settings) if settings.uses_object_storage else None
     removed = 0
     for raw in (video.source_path, video.proxy_path, video.thumbnail_path):
         if raw:
@@ -63,7 +66,7 @@ def _delete_video_media(db: Session, video: Video, settings: Settings) -> int:
 
 
 def _delete_event_media(db: Session, event: Event, settings: Settings) -> int:
-    storage = get_storage(settings) if settings.storage_backend == "s3" else None
+    storage = get_storage(settings) if settings.uses_object_storage else None
     removed = 0
     for raw in (event.thumbnail_path, event.clip_path):
         if raw:
@@ -97,6 +100,8 @@ def run_retention(
         "audit_logs": 0,
         "sessions": 0,
         "webhook_deliveries": 0,
+        "job_logs": 0,
+        "login_attempts": 0,
         "files_removed": 0,
     }
 
@@ -198,6 +203,34 @@ def run_retention(
         .filter(WebhookDelivery.created_at < webhook_cutoff)
         .delete(synchronize_session=False)
     )
+
+    job_log_cutoff = now - timedelta(days=settings.retention_media_days)
+    stale_jobs = (
+        db.query(Job)
+        .filter(
+            Job.finished_at.isnot(None),
+            Job.finished_at < job_log_cutoff,
+            ((Job.log_key.isnot(None)) | (Job.log_path.isnot(None))),
+        )
+        .all()
+    )
+    storage = get_storage(settings) if settings.uses_object_storage else None
+    for job in stale_jobs:
+        if storage is not None and job.log_key:
+            storage.delete(job.log_key)
+            counts["job_logs"] += 1
+        if job.log_path:
+            shutil.rmtree(Path(job.log_path).parent, ignore_errors=True)
+        job.log_key = None
+        job.log_path = None
+
+    attempt_cutoff = now - timedelta(days=1)
+    counts["login_attempts"] += (
+        db.query(LoginAttempt)
+        .filter(LoginAttempt.occurred_at < attempt_cutoff)
+        .delete(synchronize_session=False)
+    )
+
     from .uploads import cleanup_stale_sessions
 
     counts["sessions"] += cleanup_stale_sessions(db, settings)

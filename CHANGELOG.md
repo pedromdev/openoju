@@ -22,9 +22,38 @@ All notable changes to this project are documented here. The format follows
 
 - Identidade visual: símbolo, favicon, ícones PWA, og-image e social preview.
 - `docs/branding.md` e `scripts/brand-assets.sh`.
+- Provisionamento em Kubernetes: chart endurecido (PDB, NetworkPolicy,
+  ServiceAccount com IRSA/Workload Identity, `helm test`, NOTES) e presets
+  `minimal`, `onprem`, `aws`, `gcp`, `azure` e `magalu`.
+- Wizard `scripts/provision.py` (`init`, `doctor`, `render`, `plan`, `apply`,
+  `destroy`) que gera values, tfvars, Secret e runbook por ambiente.
+- Stacks Terraform para AWS (EKS/RDS/S3), GCP (GKE/Cloud SQL/GCS), Azure
+  (AKS/Flexible Server) e Magalu Cloud (MKE/DBaaS/Object Storage).
+- `deploy/onprem/k3s/cloud-init.yaml` com k3s, MetalLB, ingress-nginx e
+  cert-manager.
+- `scripts/e2e.py` e job `e2e` no CI com cluster `kind`, duas réplicas de API,
+  Postgres e MinIO embutidos.
+- Postgres e MinIO opcionais como StatefulSets do próprio chart.
+
+### Changed
+
+- Migrations rodam em Job de hook (`pre-install,pre-upgrade`), não mais no start
+  da API; `replicaCount.api > 1` deixa de ter corrida de migrations.
+- Logs de job vão para o object storage quando `OJU_STORAGE_BACKEND=s3`, então a
+  API serve `/api/v1/jobs/{id}/log` de qualquer réplica.
+- Upload multipart grava direto no bucket quando o backend é S3 (sem depender de
+  volume compartilhado).
+- `OJU_RATE_LIMIT_BACKEND=postgres` compartilha a janela entre réplicas.
+- MinIO embutido e do Compose usa o fork `pgsty` (o MinIO parou de publicar no
+  Docker Hub).
+- Docker Compose documentado como ambiente de desenvolvimento local.
 
 ### Fixed
 
+- `/api/health` não entra em loop de restart quando o volume de mídia está
+  indisponível; responde `degraded`.
+- `boto3` deixa de receber credenciais vazias quando o acesso vem de IRSA ou
+  Workload Identity.
 - Caminhos de mídia gravados no banco atualizados para o novo media root
   (`OJU_MEDIA_ROOT`), restaurando thumbnail, proxy e clipes de vídeos com
   `storage_backend=local`.

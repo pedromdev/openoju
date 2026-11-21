@@ -1,0 +1,1495 @@
+#!/usr/bin/env python3
+"""OpenOju provisioning wizard.
+
+Interactive helper that turns a few questions into a deployable environment:
+Helm values, Terraform variables, the Kubernetes Secret and a runbook.
+
+Only the Python standard library is used, so it runs on any host with
+``python3`` (no virtualenv, no dependencies).
+
+    python3 scripts/provision.py init --env prod
+    python3 scripts/provision.py doctor --env prod
+    python3 scripts/provision.py plan --env prod
+    python3 scripts/provision.py apply --env prod
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import re
+import secrets
+import shlex
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+DEPLOY = ROOT / "deploy"
+ENVIRONMENTS = DEPLOY / "environments"
+CHART = DEPLOY / "helm" / "openoju"
+TERRAFORM = DEPLOY / "terraform" / "stacks"
+
+STATE_SCHEMA = 1
+SECRETS_DIR = ROOT / ".secrets"
+
+TARGETS: dict[str, dict[str, object]] = {
+    "local": {
+        "label": "Cluster local (kind/k3d) ou Docker Desktop",
+        "terraform": None,
+        "cloud": False,
+        "managed_db": False,
+        "managed_storage": False,
+        "vaapi": False,
+        "ingress_class": "nginx",
+        "node_pool": False,
+        "secret": "create",
+    },
+    "onprem": {
+        "label": "Kubernetes on-premise (k3s/RKE2/Talos/kubeadm)",
+        "terraform": None,
+        "cloud": False,
+        "managed_db": False,
+        "managed_storage": False,
+        "vaapi": True,
+        "ingress_class": "nginx",
+        "node_pool": False,
+        "secret": "create",
+    },
+    "aws": {
+        "label": "AWS (EKS + RDS + S3)",
+        "terraform": "aws",
+        "cloud": True,
+        "managed_db": True,
+        "managed_storage": True,
+        "vaapi": False,
+        "ingress_class": "alb",
+        "node_pool": True,
+        "secret": "terraform",
+    },
+    "azure": {
+        "label": "Azure (AKS + Flexible Server + MinIO)",
+        "terraform": "azure",
+        "cloud": True,
+        "managed_db": True,
+        "managed_storage": True,
+        "vaapi": False,
+        "ingress_class": "nginx",
+        "node_pool": True,
+        "secret": "terraform",
+    },
+    "gcp": {
+        "label": "GCP (GKE + Cloud SQL + GCS)",
+        "terraform": "gcp",
+        "cloud": True,
+        "managed_db": True,
+        "managed_storage": True,
+        "vaapi": False,
+        "ingress_class": "gce",
+        "node_pool": True,
+        "secret": "terraform",
+    },
+    "magalu": {
+        "label": "Magalu Cloud (MKE + DBaaS + Object Storage) [experimental]",
+        "terraform": "magalu",
+        "cloud": True,
+        "managed_db": True,
+        "managed_storage": True,
+        "vaapi": False,
+        "ingress_class": "nginx",
+        "node_pool": True,
+        "secret": "terraform",
+    },
+}
+
+TLS_MODES = {
+    "cert-manager": "ingress-nginx + cert-manager (Let's Encrypt)",
+    "cloud": "Certificado gerenciado pelo balanceador da nuvem",
+    "existing": "Secret TLS já existente no cluster",
+    "none": "Sem TLS (apenas laboratório)",
+}
+
+OIDC_PROVIDERS = {
+    "none": "Sem SSO (login local)",
+    "entra": "Microsoft Entra ID",
+    "google": "Google Workspace",
+    "keycloak": "Keycloak",
+}
+
+REGISTRIES = {
+    "ghcr": "ghcr.io (imagem pública)",
+    "ecr": "Amazon ECR",
+    "acr": "Azure Container Registry",
+    "gar": "Google Artifact Registry",
+    "magalu": "Magalu Cloud Container Registry",
+}
+
+SECRET_KEYS = (
+    "OJU_SECRET_KEY",
+    "OJU_FERNET_KEY",
+    "OJU_SETUP_TOKEN",
+    "OJU_S3_ACCESS_KEY",
+    "OJU_S3_SECRET_KEY",
+)
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+
+class ProvisionError(RuntimeError):
+    pass
+
+
+def env_dir(name: str) -> Path:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,30}", name):
+        raise ProvisionError(
+            "nome do ambiente deve ter 2-31 caracteres: a-z, 0-9 e hífen"
+        )
+    return ENVIRONMENTS / name
+
+
+def utcnow() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def generate_password(length: int = 32) -> str:
+    return secrets.token_urlsafe(length)
+
+
+def generate_fernet_key() -> str:
+    # 32 bytes encoded as urlsafe base64: exactly what Fernet expects.
+    return base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+
+
+def generate_secret_key() -> str:
+    return base64.urlsafe_b64encode(secrets.token_bytes(36)).decode()
+
+
+def read_yaml_like(path: Path) -> dict:
+    """Read the flat ``key: value`` files the wizard writes.
+
+    ``answers.yaml`` and ``terraform.tfvars`` are flat by design, so a full YAML
+    parser is unnecessary (and the wizard must stay stdlib-only).
+    """
+    data: dict[str, str] = {}
+    if not path.exists():
+        return data
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" in stripped:
+            continue
+        if ":" not in stripped:
+            continue
+        key, value = stripped.split(":", 1)
+        value = value.strip().strip('"').strip("'")
+        data[key.strip()] = value
+    return data
+
+
+def dump_scalar(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return '""'
+    if isinstance(value, (int, float)):
+        return str(value)
+    text = str(value)
+    quote = False
+    if not text or text != text.strip():
+        quote = True
+    elif any(char in text for char in ":#[]{}"):
+        quote = True
+    elif text[0].isdigit() or text[0] in "-+":
+        quote = True
+    elif text.lower() in {"true", "false", "null", "yes", "no", "on", "off"}:
+        quote = True
+    return json.dumps(text) if quote else text
+
+
+def dump_yaml(data: dict, indent: int = 0) -> str:
+    """Minimal deterministic YAML emitter for the wizard's own structures."""
+    lines: list[str] = []
+    pad = " " * indent
+    for key, value in data.items():
+        if isinstance(value, dict):
+            if not value:
+                lines.append(f"{pad}{key}: {{}}")
+            else:
+                lines.append(f"{pad}{key}:")
+                lines.append(dump_yaml(value, indent + 2))
+        elif isinstance(value, list):
+            if not value:
+                lines.append(f"{pad}{key}: []")
+            else:
+                lines.append(f"{pad}{key}:")
+                for item in value:
+                    if isinstance(item, dict):
+                        lines.append(f"{pad}  -")
+                        lines.append(dump_yaml(item, indent + 4))
+                    else:
+                        lines.append(f"{pad}  - {dump_scalar(item)}")
+        else:
+            lines.append(f"{pad}{key}: {dump_scalar(value)}")
+    return "\n".join(line for line in lines if line != "")
+
+
+def dump_tfvars(data: dict, indent: int = 0) -> str:
+    lines: list[str] = []
+    pad = " " * indent
+    for key, value in data.items():
+        if isinstance(value, dict):
+            lines.append(f"{pad}{key} = {{")
+            lines.append(dump_tfvars(value, indent + 2))
+            lines.append(f"{pad}}}")
+        elif isinstance(value, list):
+            rendered = ", ".join(json.dumps(str(item)) for item in value)
+            lines.append(f"{pad}{key} = [{rendered}]")
+        elif isinstance(value, bool):
+            lines.append(f"{pad}{key} = {'true' if value else 'false'}")
+        elif isinstance(value, (int, float)):
+            lines.append(f"{pad}{key} = {value}")
+        else:
+            lines.append(f"{pad}{key} = {json.dumps(str(value))}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Interaction
+# ---------------------------------------------------------------------------
+
+
+class Prompter:
+    def __init__(self, assume_yes: bool = False) -> None:
+        self.assume_yes = assume_yes
+        self.non_interactive = assume_yes or not sys.stdin.isatty()
+
+    def ask(self, question: str, default: str, *, choices: list[str] | None = None) -> str:
+        if self.non_interactive:
+            return default
+        suffix = f" [{default}]" if default else ""
+        if choices:
+            options = " / ".join(choices)
+            suffix = f" ({options}) [{default}]"
+        while True:
+            try:
+                answer = input(f"? {question}{suffix}: ").strip()
+            except EOFError:
+                return default
+            if not answer:
+                return default
+            if choices and answer not in choices:
+                print(f"  escolha inválida: {answer}")
+                continue
+            return answer
+
+    def confirm(self, question: str, default: bool = False) -> bool:
+        if self.non_interactive:
+            return default
+        answer = self.ask(question, "s" if default else "n", choices=["s", "n"])
+        return answer == "s"
+
+
+# ---------------------------------------------------------------------------
+# Answers
+# ---------------------------------------------------------------------------
+
+
+def default_answers(name: str, target: str) -> dict[str, str]:
+    spec = TARGETS[target]
+    local = target == "local"
+    domain = "localhost" if local else "openoju.example.com"
+    return {
+        "environment": name,
+        "target": target,
+        "domain": domain,
+        "namespace": "openoju",
+        "release": "openoju",
+        "tls": "none" if local else "cert-manager",
+        "database": "managed" if spec["managed_db"] else "bundled",
+        "storage": "managed" if spec["managed_storage"] else "bundled",
+        "api_replicas": "2" if spec["cloud"] else "1",
+        "vaapi": "on" if spec["vaapi"] else "off",
+        "oidc": "none",
+        "registry": "ghcr",
+        "cluster_mode": "create" if spec["cloud"] else "existing",
+        "region": {
+            "aws": os.environ.get("AWS_REGION") or "us-east-1",
+            "gcp": "us-central1",
+            "azure": "brazilsouth",
+            "magalu": "br-se1",
+        }.get(target, ""),
+        "node_count": "2",
+        "gcp_project": os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("TF_VAR_project_id", ""),
+        "azure_subscription": os.environ.get("AZURE_SUBSCRIPTION_ID", ""),
+        "azure_acr_name": "",
+        "azure_acr_resource_group": "",
+        "gcp_gar_repository": "",
+        "gcp_gar_location": "",
+        "gcp_system_node_count": "1",
+        "db_deletion_protection": "true",
+        "bucket_force_destroy": "false",
+        "system_node_count": "2",
+        "worker_replicas": "1",
+        "image_repository": "",
+        "image_tag": "",
+        "mgc_key_pair_id": "",
+        "mgc_node_flavor": "",
+        "db_instance": {
+            "aws": "db.t4g.medium",
+            "gcp": "db-custom-2-4096",
+            "azure": "GP_Standard_D2ds_v5",
+            "magalu": "",
+        }.get(target, ""),
+    }
+
+
+def collect_answers(args: argparse.Namespace, prompter: Prompter) -> dict[str, str]:
+    name = args.env
+    answers_file = Path(args.answers) if args.answers else env_dir(name) / "answers.yaml"
+    base = default_answers(name, args.target or "local")
+    if answers_file.exists():
+        base.update({k: v for k, v in read_yaml_like(answers_file).items() if v})
+
+    target = args.target or prompter.ask(
+        "Onde o OpenOju vai rodar?", base["target"], choices=list(TARGETS)
+    )
+    base["target"] = target
+    spec = TARGETS[target]
+    defaults = default_answers(name, target)
+
+    domain = prompter.ask("Domínio público", base.get("domain") or defaults["domain"])
+    base["domain"] = domain
+    base["namespace"] = prompter.ask("Namespace do Kubernetes", base["namespace"])
+    base["release"] = prompter.ask("Nome do release Helm", base["release"])
+    base["tls"] = prompter.ask(
+        "Como terminar o TLS?", base["tls"], choices=list(TLS_MODES)
+    )
+    base["database"] = prompter.ask(
+        "Banco de dados", base["database"], choices=["managed", "bundled"]
+    )
+    if base["database"] == "managed" and not spec["managed_db"]:
+        print("  aviso: este alvo não tem banco gerenciado no Terraform; usando bundled")
+        base["database"] = "bundled"
+    base["storage"] = prompter.ask(
+        "Object storage", base["storage"], choices=["managed", "bundled"]
+    )
+    if base["storage"] == "managed" and not spec["managed_storage"]:
+        print("  aviso: Azure Blob não fala S3; usando MinIO no cluster")
+        base["storage"] = "bundled"
+    base["api_replicas"] = prompter.ask(
+        "Réplicas da API", base["api_replicas"], choices=["1", "2", "3"]
+    )
+    base["vaapi"] = prompter.ask(
+        "Aceleração VAAPI (ffmpeg)?", base["vaapi"], choices=["on", "off"]
+    )
+    base["oidc"] = prompter.ask("SSO OIDC", base["oidc"], choices=list(OIDC_PROVIDERS))
+    base["registry"] = prompter.ask(
+        "Registry da imagem", base["registry"], choices=list(REGISTRIES)
+    )
+    if spec["cloud"]:
+        base["cluster_mode"] = prompter.ask(
+            "Cluster", base["cluster_mode"], choices=["create", "existing"]
+        )
+        base["region"] = prompter.ask("Região", base["region"])
+        base["node_count"] = prompter.ask("Nós do pool de aplicação", base["node_count"])
+        base["db_instance"] = prompter.ask("Classe da instância do banco", base["db_instance"])
+        if target == "gcp":
+            base["gcp_project"] = prompter.ask(
+                "Projeto GCP (project_id)", base.get("gcp_project") or ""
+            )
+            base["gcp_gar_repository"] = prompter.ask(
+                "Repositório do Artifact Registry (vazio = ghcr)",
+                base.get("gcp_gar_repository") or "",
+            )
+            if base["gcp_gar_repository"]:
+                base["gcp_gar_location"] = prompter.ask(
+                    "Região do Artifact Registry",
+                    base.get("gcp_gar_location") or base.get("region") or "",
+                )
+        if target == "azure":
+            base["azure_subscription"] = prompter.ask(
+                "Subscription do Azure (ID)", base.get("azure_subscription") or ""
+            )
+            base["azure_acr_name"] = prompter.ask(
+                "ACR com a imagem (vazio = usar ghcr)",
+                base.get("azure_acr_name") or "",
+            )
+            if base["azure_acr_name"]:
+                base["azure_acr_resource_group"] = prompter.ask(
+                    "Resource group do ACR",
+                    base.get("azure_acr_resource_group") or "",
+                )
+        if target == "magalu":
+            base["mgc_key_pair_id"] = prompter.ask(
+                "Object Storage key pair ID (access key)",
+                base.get("mgc_key_pair_id") or "",
+            )
+    if target == "gcp" and getattr(args, "gcp_project", None):
+        base["gcp_project"] = args.gcp_project
+    if target == "azure" and getattr(args, "azure_subscription", None):
+        base["azure_subscription"] = args.azure_subscription
+    base["features"] = "provisioning"
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Rendering
+# ---------------------------------------------------------------------------
+
+
+def values_for(answers: dict[str, str]) -> dict:
+    target = answers["target"]
+    spec = TARGETS[target]
+    domain = answers["domain"]
+    replicas = int(answers["api_replicas"])
+    tls = answers["tls"]
+    storage = answers["storage"]
+
+    storage_backend = "s3"
+    if target == "azure" and storage == "managed":
+        storage_backend = "azure"
+
+    values: dict = {
+        "image": {
+            "repository": answers.get("image_repository")
+            or "ghcr.io/pedromdev/openoju",
+            "tag": answers.get("image_tag") or "0.3.0",
+        },
+        "replicaCount": {
+            "api": replicas,
+            "worker": int(answers.get("worker_replicas") or 1),
+            "dispatcher": 1,
+            "maintenance": 1,
+        },
+        "serviceAccount": {"create": True, "annotations": {}},
+        "existingSecret": f'{answers["release"]}-secrets',
+        # O wizard sempre cria o Secret (helm upgrade não gerencia segredos
+        # vindos do Terraform). O chart mantém `secrets.create` para uso manual.
+        "secrets": {"create": False, "databaseUrl": ""},
+        "config": {
+            "OJU_PUBLIC_BASE_URL": f"https://{domain}" if tls != "none" else f"http://{domain}",
+            "OJU_FRONTEND_BASE_URL": f"https://{domain}" if tls != "none" else f"http://{domain}",
+            "OJU_CORS_ORIGINS": f"https://{domain}" if tls != "none" else f"http://{domain}",
+            "OJU_COOKIE_SECURE": "true" if tls != "none" else "false",
+            "OJU_STORAGE_BACKEND": storage_backend,
+            "OJU_S3_BUCKET": f"openoju-{answers['environment']}",
+            "OJU_S3_CREATE_BUCKET": "false",
+            "OJU_RATE_LIMIT_BACKEND": "postgres" if replicas > 1 else "memory",
+        },
+        "media": {"mode": "emptyDir", "emptyDir": {"sizeLimit": "50Gi"}},
+        "data": {"mode": "emptyDir"},
+        "vaapi": {"enabled": answers["vaapi"] == "on", "groupAdd": [110]},
+        "postgresql": {"enabled": answers["database"] == "bundled"},
+        "minio": {"enabled": storage == "bundled"},
+        "pdb": {"enabled": replicas > 1},
+        "networkPolicy": {"enabled": bool(spec["cloud"])},
+        "ingress": {
+            "enabled": tls != "none",
+            "className": spec["ingress_class"],
+            "annotations": {},
+            "hosts": [{"host": domain, "paths": [{"path": "/", "pathType": "Prefix"}]}],
+            "tls": [],
+        },
+    }
+
+    if answers["vaapi"] == "on":
+        values["nodeSelector"] = {"openoju.io/pool": "app"}
+
+    if spec["cloud"]:
+        values["nodeSelector"] = {"openoju.io/pool": "app"}
+
+    release = answers["release"]
+    if tls == "cert-manager":
+        values["ingress"]["annotations"] = {
+            "cert-manager.io/cluster-issuer": "letsencrypt-prod",
+            "nginx.ingress.kubernetes.io/proxy-body-size": "0",
+            "nginx.ingress.kubernetes.io/proxy-read-timeout": "3600",
+        }
+        values["ingress"]["tls"] = [{"hosts": [domain], "secretName": f"{release}-tls"}]
+    elif tls == "existing":
+        values["ingress"]["tls"] = [{"hosts": [domain], "secretName": f"{release}-tls"}]
+
+    if target == "aws":
+        values["ingress"]["annotations"] = {
+            "alb.ingress.kubernetes.io/scheme": "internet-facing",
+            "alb.ingress.kubernetes.io/target-type": "ip",
+            "alb.ingress.kubernetes.io/listen-ports": '[{"HTTPS":443}]',
+            "alb.ingress.kubernetes.io/ssl-redirect": "443",
+            "alb.ingress.kubernetes.io/load-balancer-attributes": "idle_timeout.timeout_seconds=3600",
+        }
+        values["config"]["OJU_S3_ENDPOINT"] = (
+            f"https://s3.{answers['region']}.amazonaws.com"
+        )
+        values["config"]["OJU_S3_REGION"] = answers["region"]
+    elif target == "gcp":
+        values["config"]["OJU_S3_ENDPOINT"] = "https://storage.googleapis.com"
+        values["config"]["OJU_S3_INTERNAL_ENDPOINT"] = "https://storage.googleapis.com"
+        values["config"]["OJU_S3_REGION"] = "auto"
+        values["ingress"]["annotations"] = {
+            "kubernetes.io/ingress.allow-http": "false",
+            "networking.gke.io/managed-certificates": f"{release}-cert",
+        }
+    elif target == "magalu":
+        values["config"]["OJU_S3_ENDPOINT"] = "https://br-se1.magaluobjects.com"
+        values["config"]["OJU_S3_INTERNAL_ENDPOINT"] = "https://br-se1.magaluobjects.com"
+        values["config"]["OJU_S3_REGION"] = answers["region"]
+
+    if storage_backend == "azure":
+        values["config"].update(
+            {
+                "OJU_AZURE_STORAGE_CONTAINER": "openoju-media",
+                "OJU_AZURE_CREATE_CONTAINER": "true",
+            }
+        )
+        values["podLabels"] = {"azure.workload.identity/use": "true"}
+
+    if storage == "bundled":
+        values["config"]["OJU_S3_INTERNAL_ENDPOINT"] = (
+            f"http://{release}-openoju-minio:9000"
+        )
+        # Sem TLS não há host público: o presign aponta para o port-forward.
+        if target == "local" or tls == "none":
+            values["config"]["OJU_S3_ENDPOINT"] = "http://localhost:9000"
+            values["minio"]["public"] = {
+                "enabled": False,
+                "host": "",
+                "className": "",
+                "tlsSecret": "",
+            }
+        else:
+            values["config"]["OJU_S3_ENDPOINT"] = f"https://s3.{domain}"
+            values["minio"]["public"] = {
+                "enabled": True,
+                "host": f"s3.{domain}",
+                "className": spec["ingress_class"],
+                "tlsSecret": f"{release}-minio-tls",
+            }
+
+    if answers["oidc"] != "none":
+        issuer = {
+            "entra": "https://login.microsoftonline.com/<tenant>/v2.0",
+            "google": "https://accounts.google.com",
+            "keycloak": f"https://sso.{domain}/realms/openoju",
+        }[answers["oidc"]]
+        values["config"].update(
+            {
+                "OJU_OIDC_ENABLED": "true",
+                "OJU_OIDC_ISSUER": issuer,
+                "OJU_OIDC_CLIENT_ID": "<preencher>",
+                "OJU_OIDC_REDIRECT_URI": f"https://{domain}/api/v1/auth/oidc/callback",
+            }
+        )
+
+    return values
+
+
+def tfvars_for(answers: dict[str, str]) -> dict:
+    target = answers["target"]
+    spec = TARGETS[target]
+    if not spec["terraform"]:
+        return {}
+    data: dict = {
+        "environment": answers["environment"],
+        "region": answers["region"],
+        "node_count": int(answers["node_count"]),
+        "cluster_mode": answers["cluster_mode"],
+        "domain": answers["domain"],
+        "namespace": answers["namespace"],
+        "release_name": answers["release"],
+        "create_database": answers["database"] == "managed",
+        "create_bucket": answers["storage"] == "managed",
+    }
+    if target in {"aws", "gcp", "azure"}:
+        data["system_node_count"] = int(answers.get("system_node_count") or 2)
+    if target in {"aws", "gcp", "azure"}:
+        data["db_instance_class"] = answers["db_instance"]
+    if target == "magalu":
+        if answers.get("db_instance"):
+            data["db_instance_type"] = answers["db_instance"]
+        if answers.get("db_engine_version"):
+            data["db_engine_version"] = answers["db_engine_version"]
+        if answers.get("mgc_node_flavor"):
+            data["node_flavor"] = answers["mgc_node_flavor"]
+    if target == "azure":
+        data["create_bucket"] = False
+        if answers.get("azure_subscription"):
+            data["subscription_id"] = answers["azure_subscription"]
+        if answers.get("azure_acr_name"):
+            data["existing_acr_name"] = answers["azure_acr_name"]
+            data["existing_acr_resource_group"] = answers.get(
+                "azure_acr_resource_group", ""
+            )
+    if target == "gcp":
+        data["bucket_force_destroy"] = (
+            answers.get("bucket_force_destroy", "false") == "true"
+        )
+        if answers.get("gcp_project"):
+            data["project_id"] = answers["gcp_project"]
+        if answers.get("gcp_gar_repository"):
+            data["existing_gar_repository"] = answers["gcp_gar_repository"]
+            data["existing_gar_location"] = answers.get("gcp_gar_location", "")
+        if answers.get("gcp_system_node_count"):
+            data["system_node_count"] = int(answers["gcp_system_node_count"])
+        if answers.get("gcp_machine_type"):
+            data["machine_type"] = answers["gcp_machine_type"]
+        if answers.get("gcp_db_authorized_networks"):
+            data["db_authorized_networks"] = [
+                item.strip()
+                for item in answers["gcp_db_authorized_networks"].split(",")
+                if item.strip()
+            ]
+    if target == "aws":
+        data["db_deletion_protection"] = (
+            answers.get("db_deletion_protection", "true") == "true"
+        )
+        data["bucket_force_destroy"] = (
+            answers.get("bucket_force_destroy", "false") == "true"
+        )
+    if target == "magalu":
+        # Só o ID público; o secret e a API key vêm de TF_VAR_* no ambiente.
+        if answers.get("mgc_key_pair_id"):
+            data["mgc_key_pair_id"] = answers["mgc_key_pair_id"]
+    return data
+
+
+def secrets_for(answers: dict[str, str], previous: dict[str, str] | None = None) -> dict[str, str]:
+    previous = previous or {}
+    values = {
+        "OJU_SECRET_KEY": previous.get("OJU_SECRET_KEY") or generate_secret_key(),
+        "OJU_FERNET_KEY": previous.get("OJU_FERNET_KEY") or generate_fernet_key(),
+        "OJU_SETUP_TOKEN": previous.get("OJU_SETUP_TOKEN") or generate_password(24),
+    }
+    # Na AWS (IRSA) e na Azure (Workload Identity) o acesso vem da identidade
+    # do pod; chaves estáticas no Secret quebrariam ou seriam desnecessárias.
+    uses_managed_identity = (
+        answers["storage"] == "managed"
+        and answers["target"] in {"aws", "azure"}
+    )
+    if not uses_managed_identity:
+        values["OJU_S3_ACCESS_KEY"] = (
+            previous.get("OJU_S3_ACCESS_KEY") or f"oju{secrets.token_hex(8)}"
+        )
+        values["OJU_S3_SECRET_KEY"] = (
+            previous.get("OJU_S3_SECRET_KEY") or generate_password(32)
+        )
+    if answers["database"] == "bundled":
+        values["postgres-password"] = previous.get("postgres-password") or generate_password(
+            24
+        )
+        values["OJU_DATABASE_URL"] = (
+            "postgresql+psycopg://openoju:"
+            f"{values['postgres-password']}@{answers['release']}-openoju-postgresql:5432/openoju"
+        )
+    return values
+
+
+def apply_outputs(values: dict, outputs: dict) -> dict:
+    """Aplica ao values o que só o Terraform sabe (bucket, IRSA, endpoints)."""
+    config = values.setdefault("config", {})
+    if outputs.get("bucket"):
+        config["OJU_S3_BUCKET"] = outputs["bucket"]
+    if outputs.get("s3_endpoint"):
+        config["OJU_S3_ENDPOINT"] = outputs["s3_endpoint"]
+    if outputs.get("s3_region"):
+        config["OJU_S3_REGION"] = outputs["s3_region"]
+    if outputs.get("storage_account"):
+        config["OJU_AZURE_STORAGE_ACCOUNT"] = outputs["storage_account"]
+    if outputs.get("storage_container"):
+        config["OJU_AZURE_STORAGE_CONTAINER"] = outputs["storage_container"]
+    if outputs.get("storage_endpoint"):
+        config["OJU_AZURE_STORAGE_ENDPOINT"] = outputs["storage_endpoint"]
+    annotations = outputs.get("service_account_annotations")
+    if annotations:
+        values.setdefault("serviceAccount", {})["annotations"] = annotations
+    return values
+
+
+def read_outputs(directory: Path) -> dict:
+    path = directory / "outputs.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def write_outputs(directory: Path, outputs: dict) -> None:
+    keep = {
+        key: outputs[key]
+        for key in (
+            "bucket",
+            "s3_endpoint",
+            "s3_region",
+            "service_account_annotations",
+            "storage_account",
+            "storage_container",
+            "storage_endpoint",
+        )
+        if outputs.get(key)
+    }
+    if keep:
+        (directory / "outputs.json").write_text(
+            json.dumps(keep, indent=2) + "\n", encoding="utf-8"
+        )
+
+
+def render_environment(answers: dict[str, str], *, force: bool = False) -> Path:
+    directory = env_dir(answers["environment"])
+    directory.mkdir(parents=True, exist_ok=True)
+
+    secrets_path = directory / "secrets.env"
+    previous = read_env_file(secrets_path) if secrets_path.exists() else {}
+    new_secrets = secrets_for(answers, previous)
+
+    values = values_for(answers)
+    apply_outputs(values, read_outputs(directory))
+    (directory / "answers.yaml").write_text(
+        "# Gerado por scripts/provision.py — não contém segredos.\n"
+        + dump_yaml(answers)
+        + "\n",
+        encoding="utf-8",
+    )
+    (directory / "values.yaml").write_text(
+        "# Gerado por scripts/provision.py a partir de answers.yaml.\n"
+        + dump_yaml(values)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    tfvars = tfvars_for(answers)
+    if tfvars:
+        (directory / "terraform.tfvars").write_text(
+            "# Gerado por scripts/provision.py.\n" + dump_tfvars(tfvars) + "\n",
+            encoding="utf-8",
+        )
+
+    lines = ["# Gerado por scripts/provision.py — NUNCA versionar."]
+    lines += [f"{key}={value}" for key, value in new_secrets.items()]
+    secrets_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    secrets_path.chmod(0o600)
+
+    state = {
+        "schema": STATE_SCHEMA,
+        "environment": answers["environment"],
+        "target": answers["target"],
+        "rendered_at": utcnow(),
+        "values_sha": hashlib_sha((directory / "values.yaml").read_bytes()),
+        "answers": answers,
+    }
+    (directory / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    (directory / "runbook.md").write_text(runbook_for(answers), encoding="utf-8")
+    return directory
+
+
+def load_cloud_credentials(target: str, *, enabled: bool = True) -> Path | None:
+    """Carrega .secrets/<target>.env sem sobrescrever o ambiente atual."""
+    if not enabled or target not in {"aws", "azure", "gcp", "magalu"}:
+        return None
+    path = SECRETS_DIR / f"{target}.env"
+    if not path.exists():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :]
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    return path
+
+
+def apply_env_defaults(answers: dict[str, str]) -> None:
+    """Completa respostas com identificadores vindos do ambiente."""
+    target = answers.get("target")
+    if target == "aws" and not answers.get("region"):
+        answers["region"] = os.environ.get("AWS_REGION") or "us-east-1"
+    if target == "azure" and not answers.get("azure_subscription"):
+        answers["azure_subscription"] = os.environ.get("AZURE_SUBSCRIPTION_ID", "")
+    if target == "gcp" and not answers.get("gcp_project"):
+        answers["gcp_project"] = os.environ.get(
+            "GOOGLE_CLOUD_PROJECT"
+        ) or os.environ.get("TF_VAR_project_id", "")
+
+
+def read_env_file(path: Path) -> dict[str, str]:
+    data: dict[str, str] = {}
+    if not path.exists():
+        return data
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        data[key.strip()] = value.strip()
+    return data
+
+
+def hashlib_sha(data: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(data).hexdigest()
+
+
+def runbook_for(answers: dict[str, str]) -> str:
+    target = answers["target"]
+    directory = env_dir(answers["environment"])
+    try:
+        rel: object = directory.relative_to(ROOT)
+    except ValueError:  # test or custom environment root
+        rel = directory
+    lines = [
+        f"# Runbook — {answers['environment']} ({target})",
+        "",
+        f"Gerado em {utcnow()} por `scripts/provision.py`.",
+        "",
+        "## Caminhos",
+        "",
+        "```text",
+        f"{rel}/answers.yaml       respostas (versionável)",
+        f"{rel}/values.yaml        valores do Helm",
+        f"{rel}/secrets.env        segredos (600, gitignored)",
+        f"{rel}/terraform.tfvars   variáveis do Terraform",
+        "```",
+        "",
+        "## Sequência",
+        "",
+        "```bash",
+        f"python3 scripts/provision.py doctor --env {answers['environment']}",
+        f"python3 scripts/provision.py plan   --env {answers['environment']}",
+        f"python3 scripts/provision.py apply  --env {answers['environment']}",
+        "```",
+        "",
+    ]
+    if TARGETS[target]["terraform"]:
+        lines += [
+            "## Infraestrutura",
+            "",
+            f"Stack: `deploy/terraform/stacks/{TARGETS[target]['terraform']}`.",
+            "O `plan` deve ser revisado antes do `apply`. O wizard lê os outputs",
+            "(`database_url`, `bucket`, `service_account_annotations`) e injeta",
+            "no Secret e nos values.",
+            "",
+        ]
+    if answers["database"] == "bundled":
+        lines += [
+            "## Banco embutido",
+            "",
+            f"Postgres em `{answers['release']}-openoju-postgresql:5432`.",
+            "Backup: `pg_dump` a partir do pod do Postgres.",
+            "",
+        ]
+    if answers["storage"] == "bundled":
+        lines += [
+            "## Object storage embutido",
+            "",
+            f"MinIO interno em `{answers['release']}-openoju-minio:9000`.",
+            f"Endpoint público: `https://s3.{answers['domain']}` (precisa de DNS).",
+            "",
+        ]
+    lines += [
+        "## Primeiro acesso",
+        "",
+        "```bash",
+        f"kubectl -n {answers['namespace']} get secret {answers['release']}-secrets -o jsonpath='{{.data.OJU_SETUP_TOKEN}}' | base64 -d",
+        "```",
+        "",
+        "Use o token em `POST /api/v1/auth/setup`.",
+        "",
+        "## Checklist pós-apply",
+        "",
+        "- [ ] DNS do host público aponta para o ingress/load balancer",
+        "- [ ] CORS do bucket inclui a origem pública",
+        "- [ ] `helm test` verde",
+        "- [ ] setup inicial concluído",
+        "- [ ] upload de vídeo e job de análise concluídos",
+        "- [ ] `/api/v1/jobs/{id}/log` responde com a API em outra réplica",
+        "",
+    ]
+    if target in {"aws", "gcp", "azure", "magalu"}:
+        lines += [
+            "## Verificação pendente",
+            "",
+            "Esta trilha não foi validada em ambiente real. Rode `plan`, revise o",
+            "`terraform plan` e registre o resultado em",
+            "`docs/provisioning/verification.md`.",
+            "",
+        ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+
+
+def which(binary: str) -> str | None:
+    return shutil.which(binary)
+
+
+KUBECONFIG: Path | None = None
+
+
+def run(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    capture: bool = False,
+    quiet: bool = False,
+) -> str:
+    if not quiet:
+        print(f"$ {' '.join(cmd)}")
+    env = os.environ.copy()
+    if KUBECONFIG is not None:
+        env["KUBECONFIG"] = str(KUBECONFIG)
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd or ROOT),
+            text=True,
+            capture_output=capture,
+            check=True,
+            env=env,
+        )
+    except FileNotFoundError as exc:
+        raise ProvisionError(f"binário não encontrado: {cmd[0]}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise ProvisionError(f"comando falhou ({exc.returncode}): {' '.join(cmd)}") from exc
+    return result.stdout if capture else ""
+
+
+def check_credentials(answers: dict[str, str]) -> list[str]:
+    """Best-effort identity check. Never prints secrets."""
+    target = answers["target"]
+    problems: list[str] = []
+
+    if target == "aws" and which("aws"):
+        try:
+            account = run(
+                ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"],
+                capture=True,
+                quiet=True,
+            ).strip()
+            print(f"  aws: conta {account}")
+        except ProvisionError:
+            problems.append(
+                "aws sts get-caller-identity falhou; configure AWS_PROFILE/SSO "
+                "(veja docs/provisioning/credentials.md)"
+            )
+    elif target == "gcp" and which("gcloud"):
+        if not answers.get("gcp_project"):
+            problems.append("preencha gcp_project (project_id) no answers.yaml")
+        try:
+            account = run(
+                [
+                    "gcloud",
+                    "auth",
+                    "list",
+                    "--filter=status:ACTIVE",
+                    "--format=value(account)",
+                ],
+                capture=True,
+                quiet=True,
+            ).strip()
+            print(f"  gcp: conta {account or '<nenhuma>'}")
+            if not account:
+                problems.append("gcloud sem conta ativa; rode gcloud auth login")
+        except ProvisionError:
+            problems.append("gcloud falhou; rode gcloud auth login")
+    elif target == "azure" and which("az"):
+        if not answers.get("azure_subscription"):
+            problems.append("preencha azure_subscription (ID) no answers.yaml")
+        try:
+            subscription = run(
+                ["az", "account", "show", "--query", "id", "-o", "tsv"],
+                capture=True,
+                quiet=True,
+            ).strip()
+            print(f"  azure: subscription {subscription}")
+            if answers.get("azure_subscription") and subscription != answers["azure_subscription"]:
+                problems.append(
+                    "azure_subscription difere do az account show; rode az account set"
+                )
+        except ProvisionError:
+            problems.append("az account show falhou; rode az login")
+    elif target == "magalu":
+        if not os.environ.get("TF_VAR_mgc_api_key"):
+            problems.append(
+                "export TF_VAR_mgc_api_key=... (API key da Magalu Cloud)"
+            )
+        if answers.get("mgc_key_pair_id") and not os.environ.get(
+            "TF_VAR_mgc_key_pair_secret"
+        ):
+            problems.append("export TF_VAR_mgc_key_pair_secret=... (secret do key pair)")
+
+    return problems
+
+
+def doctor(answers: dict[str, str]) -> list[str]:
+    target = answers["target"]
+    spec = TARGETS[target]
+    problems: list[str] = []
+    required = ["helm", "kubectl"]
+    if spec["terraform"] and answers["cluster_mode"] == "create":
+        required.append("terraform")
+    # O CLI da Magalu é opcional: o Terraform cobre criação e kubeconfig.
+    cloud_cli = {"aws": "aws", "gcp": "gcloud", "azure": "az"}
+    if target in cloud_cli:
+        required.append(cloud_cli[target])
+    if target == "gcp":
+        # kubectl usa este plugin para autenticar no GKE.
+        required.append("gke-gcloud-auth-plugin")
+
+    print("Ferramentas")
+    for binary in required:
+        path = which(binary)
+        print(f"  {'ok  ' if path else 'falta'} {binary}{f' ({path})' if path else ''}")
+        if not path:
+            problems.append(f"instale {binary}")
+
+    print("\nContexto")
+    needs_context = not (spec["cloud"] and answers["cluster_mode"] == "create")
+    if which("kubectl"):
+        try:
+            context = run(["kubectl", "config", "current-context"], capture=True).strip()
+            print(f"  kubeconfig: {context or '<vazio>'}")
+            if not context and needs_context:
+                problems.append("kubeconfig sem contexto atual")
+            elif not context:
+                print("  o kubeconfig será obtido depois do terraform apply")
+        except ProvisionError:
+            if needs_context:
+                problems.append("kubectl não conseguiu ler o kubeconfig")
+    if spec["terraform"] and answers["cluster_mode"] == "create":
+        stack = TERRAFORM / str(spec["terraform"])
+        if not stack.exists():
+            problems.append(f"stack Terraform ausente: {stack.relative_to(ROOT)}")
+        else:
+            print(f"  stack Terraform: {stack.relative_to(ROOT)}")
+    print("\nCredenciais locais")
+    secrets_dir = SECRETS_DIR
+    if secrets_dir.exists():
+        mode = oct(secrets_dir.stat().st_mode)[-3:]
+        print(f"  .secrets: permissão {mode}")
+        if mode != "700":
+            problems.append("chmod 700 .secrets")
+    target_secrets = secrets_dir / f"{answers['target']}.env"
+    if target_secrets.exists():
+        mode = oct(target_secrets.stat().st_mode)[-3:]
+        print(f"  {target_secrets.name}: permissão {mode}")
+        if mode != "600":
+            problems.append(f"chmod 600 {target_secrets.relative_to(ROOT)}")
+    else:
+        print(f"  {target_secrets.name}: ausente (usando variáveis do ambiente)")
+
+    print("\nCredenciais")
+    for problem in check_credentials(answers):
+        problems.append(problem)
+
+    secrets_path = env_dir(answers["environment"]) / "secrets.env"
+    if secrets_path.exists():
+        mode = oct(secrets_path.stat().st_mode)[-3:]
+        print(f"  secrets.env: permissão {mode}")
+        if mode != "600":
+            problems.append(f"chmod 600 {secrets_path.relative_to(ROOT)}")
+        missing = [key for key in SECRET_KEYS if key not in read_env_file(secrets_path)]
+        if missing and TARGETS[answers["target"]]["secret"] == "create":
+            problems.append(f"faltam chaves em secrets.env: {', '.join(missing)}")
+    else:
+        problems.append("secrets.env ausente; rode init")
+
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------------
+
+
+def required_identifiers(answers: dict[str, str]) -> list[str]:
+    target = answers["target"]
+    missing: list[str] = []
+    if target == "gcp" and not answers.get("gcp_project"):
+        missing.append("gcp_project (use --gcp-project ou answers.yaml)")
+    if target == "azure" and not answers.get("azure_subscription"):
+        missing.append("azure_subscription (use --azure-subscription ou answers.yaml)")
+    if target == "magalu" and not os.environ.get("TF_VAR_mgc_api_key"):
+        missing.append("TF_VAR_mgc_api_key no ambiente (API key da Magalu)")
+    return missing
+
+
+def load_answers(name: str) -> dict[str, str]:
+    directory = env_dir(name)
+    path = directory / "answers.yaml"
+    if not path.exists():
+        raise ProvisionError(
+            f"ambiente {name!r} não existe; rode: python3 scripts/provision.py init --env {name}"
+        )
+    answers = read_yaml_like(path)
+    if answers.get("target") not in TARGETS:
+        raise ProvisionError("answers.yaml inválido: target desconhecido")
+    return answers
+
+
+def action_init(args: argparse.Namespace) -> int:
+    prompter = Prompter(args.yes)
+    directory = env_dir(args.env)
+    if directory.exists() and (directory / "answers.yaml").exists() and not args.force:
+        if not prompter.confirm(f"Ambiente {args.env} já existe. Sobrescrever?", False):
+            print("nada a fazer")
+            return 0
+    existing = read_yaml_like(directory / "answers.yaml")
+    target = args.target or existing.get("target") or "local"
+    load_cloud_credentials(target, enabled=not args.no_credentials)
+    answers = collect_answers(args, prompter)
+    directory = render_environment(answers, force=True)
+    print(f"\nambiente gerado em {directory.relative_to(ROOT)}")
+    missing = required_identifiers(answers)
+    if missing:
+        print("\naviso: faltam identificadores da nuvem:")
+        for item in missing:
+            print(f"  - {item}")
+        print("  edite answers.yaml e rode: provision.py render --env", args.env)
+    print("segredos em secrets.env (600, gitignored)")
+    print(f"próximo passo: python3 scripts/provision.py doctor --env {args.env}")
+    return 0
+
+
+def action_doctor(args: argparse.Namespace) -> int:
+    answers = load_answers(args.env)
+    problems = doctor(answers)
+    if problems:
+        print("\nPendências:")
+        for problem in problems:
+            print(f"  - {problem}")
+        return 1
+    print("\ntudo pronto")
+    return 0
+
+
+def action_render(args: argparse.Namespace) -> int:
+    answers = load_answers(args.env)
+    render_environment(answers)
+    print(f"values.yaml atualizado em {env_dir(args.env).relative_to(ROOT)}")
+    return 0
+
+
+def terraform_stack(answers: dict[str, str]) -> Path | None:
+    spec = TARGETS[answers["target"]]
+    if not spec["terraform"] or answers["cluster_mode"] == "existing":
+        return None
+    return TERRAFORM / str(spec["terraform"])
+
+
+def action_plan(args: argparse.Namespace) -> int:
+    answers = load_answers(args.env)
+    directory = env_dir(args.env)
+    load_cloud_credentials(answers["target"], enabled=not args.no_credentials)
+    apply_env_defaults(answers)
+    stack = terraform_stack(answers)
+    if stack is not None:
+        if not stack.exists():
+            raise ProvisionError(f"stack Terraform ausente: {stack.relative_to(ROOT)}")
+        run(["terraform", "init", "-input=false"], cwd=stack)
+        run(["terraform", "plan", f"-var-file={directory / 'terraform.tfvars'}"], cwd=stack)
+    rendered = run(
+        [
+            "helm",
+            "template",
+            answers["release"],
+            str(CHART),
+            "-n",
+            answers["namespace"],
+            "-f",
+            str(directory / "values.yaml"),
+        ],
+        capture=True,
+    )
+    (directory / "render.yaml").write_text(rendered, encoding="utf-8")
+    print(f"helm template ok -> {(directory / 'render.yaml').relative_to(ROOT)}")
+    return 0
+
+
+def action_apply(args: argparse.Namespace) -> int:
+    global KUBECONFIG
+    answers = load_answers(args.env)
+    directory = env_dir(args.env)
+    # Isola o kubeconfig por ambiente: execuções paralelas (ou clouds distintas)
+    # não podem compartilhar ~/.kube/config.
+    if (
+        answers.get("cluster_mode") == "create"
+        and not os.environ.get("KUBECONFIG")
+        and KUBECONFIG is None
+    ):
+        KUBECONFIG = directory / "kubeconfig.yaml"
+    problems = doctor(answers)
+    if problems:
+        for problem in problems:
+            print(f"  - {problem}")
+        raise ProvisionError("doctor encontrou pendências")
+
+    secrets_path = directory / "secrets.env"
+    secret_values = read_env_file(secrets_path)
+
+    values_path = directory / "values.yaml"
+    values = values_for(answers)
+
+    stack = terraform_stack(answers)
+    if stack is not None:
+        run(["terraform", "init", "-input=false"], cwd=stack)
+        run(
+            [
+                "terraform",
+                "apply",
+                "-auto-approve",
+                "-input=false",
+                f"-var-file={directory / 'terraform.tfvars'}",
+            ],
+            cwd=stack,
+        )
+        raw = run(["terraform", "output", "-json"], cwd=stack, capture=True)
+        outputs = json.loads(raw or "{}")
+        database_url = outputs.get("database_url", {}).get("value")
+        if database_url:
+            secret_values["OJU_DATABASE_URL"] = database_url
+        resolved = {key: data.get("value") for key, data in outputs.items()}
+        apply_outputs(values, resolved)
+        write_outputs(directory, resolved)
+        for output_key, secret_key in (
+            ("s3_access_key", "OJU_S3_ACCESS_KEY"),
+            ("s3_secret_key", "OJU_S3_SECRET_KEY"),
+        ):
+            value = outputs.get(output_key, {}).get("value")
+            if value:
+                secret_values[secret_key] = value
+        kubeconfig_value = outputs.get("kubeconfig", {}).get("value")
+        if kubeconfig_value:
+            path = directory / "kubeconfig.yaml"
+            path.write_text(kubeconfig_value, encoding="utf-8")
+            path.chmod(0o600)
+            KUBECONFIG = path
+        command = outputs.get("kubeconfig_command", {}).get("value")
+        if command:
+            run(shlex.split(command))
+        values_path.write_text(
+            "# Gerado por scripts/provision.py a partir de answers.yaml.\n"
+            + dump_yaml(values)
+            + "\n",
+            encoding="utf-8",
+        )
+
+    namespace = answers["namespace"]
+    ensure_namespace(namespace)
+
+    env_args: list[str] = []
+    for key, value in secret_values.items():
+        env_args += [f"--from-literal={key}={value}"]
+    # quiet: o comando carrega --from-literal com todos os segredos.
+    secret_manifest = run(
+        [
+            "kubectl",
+            "-n",
+            namespace,
+            "create",
+            "secret",
+            "generic",
+            f"{answers['release']}-secrets",
+            *env_args,
+            "--dry-run=client",
+            "-o",
+            "yaml",
+        ],
+        capture=True,
+        quiet=True,
+    )
+    print("$ kubectl create secret generic <release>-secrets --from-literal=...")
+    apply_stdin(secret_manifest)
+
+    run(
+        [
+            "helm",
+            "upgrade",
+            "--install",
+            answers["release"],
+            str(CHART),
+            "-n",
+            namespace,
+            "--create-namespace",
+            "-f",
+            str(directory / "values.yaml"),
+        ]
+    )
+    run(
+        [
+            "kubectl",
+            "-n",
+            namespace,
+            "rollout",
+            "status",
+            f"deployment/{answers['release']}-openoju-api",
+            "--timeout=600s",
+        ]
+    )
+    run(["helm", "test", answers["release"], "-n", namespace, "--timeout=300s"])
+    print("\naplicado. runbook:", (directory / "runbook.md").relative_to(ROOT))
+    return 0
+
+
+def ensure_namespace(namespace: str) -> None:
+    if not namespace_exists(namespace):
+        run(["kubectl", "create", "namespace", namespace], capture=True)
+
+
+def namespace_exists(namespace: str) -> bool:
+    try:
+        run(["kubectl", "get", "namespace", namespace], capture=True)
+        return True
+    except ProvisionError:
+        return False
+
+
+def apply_stdin(manifest: str) -> None:
+    print("$ kubectl apply -f - (secret)")
+    env = os.environ.copy()
+    if KUBECONFIG is not None:
+        env["KUBECONFIG"] = str(KUBECONFIG)
+    try:
+        subprocess.run(
+            ["kubectl", "apply", "-f", "-"],
+            input=manifest,
+            text=True,
+            check=True,
+            cwd=str(ROOT),
+            env=env,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise ProvisionError("falha ao aplicar o Secret") from exc
+
+
+def action_destroy(args: argparse.Namespace) -> int:
+    answers = load_answers(args.env)
+    prompter = Prompter(assume_yes=False)
+    if not args.yes:
+        typed = prompter.ask(
+            f"Digite o nome do ambiente ({answers['environment']}) para destruir",
+            "",
+        )
+        if typed != answers["environment"]:
+            print("cancelado")
+            return 1
+    # O cluster pode já ter sido removido (destroy parcial): não impedir a
+    # limpeza do restante da infraestrutura.
+    try:
+        run(
+            [
+                "helm",
+                "uninstall",
+                answers["release"],
+                "-n",
+                answers["namespace"],
+                "--ignore-not-found",
+            ]
+        )
+        run(
+            [
+                "kubectl",
+                "-n",
+                answers["namespace"],
+                "delete",
+                "secret",
+                f"{answers['release']}-secrets",
+                "--ignore-not-found",
+            ]
+        )
+    except ProvisionError as exc:
+        print(f"aviso: cluster inacessível, seguindo para o Terraform ({exc})")
+    stack = terraform_stack(answers)
+    if stack is not None:
+        directory = env_dir(args.env)
+        run(
+            [
+                "terraform",
+                "destroy",
+                "-auto-approve",
+                f"-var-file={directory / 'terraform.tfvars'}",
+            ],
+            cwd=stack,
+        )
+    print("destruído")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="provision.py",
+        description="Wizard de provisionamento do OpenOju (Kubernetes, on-prem e nuvem).",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    def add_env(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--env", "-e", default="dev", help="nome do ambiente")
+        p.add_argument("--yes", "-y", action="store_true", help="não interativo")
+        p.add_argument("--verbose", "-v", action="store_true", help="saída detalhada")
+        p.add_argument(
+            "--no-credentials",
+            action="store_true",
+            help="não carregar .secrets/<alvo>.env automaticamente",
+        )
+
+    p_init = sub.add_parser("init", help="perguntas e geração do ambiente")
+    add_env(p_init)
+    p_init.add_argument("--target", choices=list(TARGETS), help="alvo de provisionamento")
+    p_init.add_argument("--answers", help="arquivo de respostas para modo não interativo")
+    p_init.add_argument("--force", action="store_true", help="sobrescrever ambiente existente")
+    p_init.add_argument("--gcp-project", help="project_id do GCP (alvo gcp)")
+    p_init.add_argument(
+        "--azure-subscription", help="ID da subscription do Azure (alvo azure)"
+    )
+    p_init.set_defaults(func=action_init)
+
+    for name, func, help_text in (
+        ("doctor", action_doctor, "verifica ferramentas, credenciais e arquivos"),
+        ("render", action_render, "regenera values.yaml a partir de answers.yaml"),
+        ("plan", action_plan, "terraform plan + helm template"),
+        ("apply", action_apply, "terraform apply + Secret + helm upgrade"),
+        ("destroy", action_destroy, "helm uninstall + terraform destroy"),
+    ):
+        p = sub.add_parser(name, help=help_text)
+        add_env(p)
+        p.set_defaults(func=func)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return int(args.func(args))
+    except ProvisionError as exc:
+        print(f"erro: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\ninterrompido", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -11,7 +11,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from cryptography.fernet import Fernet, InvalidToken
 
-from .config import get_settings
+from .config import Settings, get_settings
 
 _hasher = PasswordHasher(time_cost=3, memory_cost=65536, parallelism=4)
 
@@ -119,7 +119,7 @@ def decrypt_secret(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Login rate limiting (in-process)
+# Login rate limiting
 # ---------------------------------------------------------------------------
 
 
@@ -127,7 +127,7 @@ class SlidingWindowLimiter:
     """Small in-memory limiter.
 
     Adequate for a single API process. Deployments with multiple replicas must
-    move the counter to a shared store.
+    set ``OJU_RATE_LIMIT_BACKEND=postgres`` so the window is shared.
     """
 
     def __init__(self) -> None:
@@ -140,20 +140,64 @@ class SlidingWindowLimiter:
             hits.popleft()
         return hits
 
-    def blocked(self, key: str, *, attempts: int, window_s: int) -> bool:
+    def blocked(self, db, key: str, *, attempts: int, window_s: int) -> bool:
         now = time.monotonic()
         hits = self._prune(key, window_s, now)
         return len(hits) >= attempts
 
-    def hit(self, key: str, *, window_s: int) -> None:
+    def hit(self, db, key: str, *, window_s: int) -> None:
         now = time.monotonic()
         self._prune(key, window_s, now).append(now)
 
-    def reset(self, key: str) -> None:
+    def reset(self, db, key: str) -> None:
         self._hits.pop(key, None)
 
 
+class PostgresLimiter:
+    """Sliding-window limiter backed by the database.
+
+    Works across API replicas without extra infrastructure. Each hit is one
+    small row; ``run_retention`` prunes expired rows.
+    """
+
+    def blocked(self, db, key: str, *, attempts: int, window_s: int) -> bool:
+        from sqlalchemy import func
+
+        from .models import LoginAttempt, utcnow
+
+        cutoff = utcnow() - timedelta(seconds=window_s)
+        count = (
+            db.query(func.count(LoginAttempt.id))
+            .filter(LoginAttempt.key == key, LoginAttempt.occurred_at >= cutoff)
+            .scalar()
+        )
+        return int(count or 0) >= attempts
+
+    def hit(self, db, key: str, *, window_s: int) -> None:
+        from .models import LoginAttempt
+
+        db.add(LoginAttempt(key=key))
+        db.commit()
+
+    def reset(self, db, key: str) -> None:
+        from .models import LoginAttempt
+
+        db.query(LoginAttempt).filter(LoginAttempt.key == key).delete(
+            synchronize_session=False
+        )
+        db.commit()
+
+
 login_limiter = SlidingWindowLimiter()
+_postgres_limiter = PostgresLimiter()
+
+
+def limiter_for(settings: Settings | None = None):
+    """Pick the limiter implementation from ``OJU_RATE_LIMIT_BACKEND``."""
+    settings = settings or get_settings()
+    if settings.rate_limit_backend.lower() == "postgres":
+        return _postgres_limiter
+    return login_limiter
 
 
 def session_expiry(hours: int) -> datetime:

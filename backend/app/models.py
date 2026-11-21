@@ -350,6 +350,10 @@ class Job(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_path: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     log_path: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    # Object key for the job log when the storage backend is remote. Keeping the
+    # log out of the local filesystem removes the need for a shared RWX volume
+    # between the worker and the API.
+    log_key: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     worker_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
@@ -709,4 +713,22 @@ class LegalHold(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow
+    )
+
+
+class LoginAttempt(Base):
+    """Shared login/DSR rate-limit counter.
+
+    The in-process limiter works for a single API replica. When more than one
+    replica runs behind a load balancer, each process would otherwise keep its
+    own window and effectively multiply the allowed attempts.
+    """
+
+    __tablename__ = "login_attempts"
+    __table_args__ = (Index("ix_login_attempts_key_time", "key", "occurred_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(300), index=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
     )

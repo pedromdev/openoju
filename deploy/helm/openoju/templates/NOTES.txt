@@ -1,0 +1,65 @@
+OpenOju {{ .Chart.AppVersion }} instalado em {{ .Release.Namespace }}.
+
+URL pública: {{ .Values.config.OJU_PUBLIC_BASE_URL }}
+
+Componentes:
+  API ......... {{ include "openoju.fullname" . }}:{{ .Values.service.port }} ({{ .Values.replicaCount.api }} réplica(s))
+  Worker ...... {{ .Values.replicaCount.worker }} réplica(s)
+  Dispatcher .. {{ .Values.replicaCount.dispatcher }} réplica(s)
+  Maintenance . {{ .Values.replicaCount.maintenance }} réplica(s)
+
+Migrations: job "{{ include "openoju.fullname" . }}-migrate" (hook pre-install/pre-upgrade).
+
+{{- if .Values.ingress.enabled }}
+
+Ingress: {{ .Values.ingress.className | default "default" }}
+{{- $hosts := .Values.ingress.hosts }}
+{{- if and (not $hosts) .Values.ingress.host }}
+{{- $hosts = list (dict "host" .Values.ingress.host) }}
+{{- end }}
+{{- range $hosts }}
+  - {{ .host }}
+{{- end }}
+{{- end }}
+
+Próximos passos
+---------------
+1. Confirme o DNS e o TLS do host público.
+2. Faça o setup inicial (token único no Secret):
+
+   TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ include "openoju.secretName" . }} \
+     -o jsonpath='{.data.OJU_SETUP_TOKEN}' | base64 -d)
+
+   curl -sS -X POST {{ .Values.config.OJU_PUBLIC_BASE_URL }}/api/v1/auth/setup \
+     -H 'Content-Type: application/json' \
+     -d "{\"token\":\"$TOKEN\",\"organization_name\":\"Minha org\",
+          \"organization_slug\":\"minha-org\",\"owner_email\":\"voce@example.com\",
+          \"owner_password\":\"...\",\"owner_display_name\":\"Owner\"}"
+
+3. Verifique a saúde e o fluxo de upload:
+
+   kubectl -n {{ .Release.Namespace }} run openoju-test --rm -it --restart=Never \
+     --image={{ include "openoju.image" . }} -- \
+     curl -sS http://{{ include "openoju.fullname" . }}:{{ .Values.service.port }}/api/health
+
+{{- if eq .Values.config.OJU_STORAGE_BACKEND "s3" }}
+
+Storage: S3/GCS/Object Storage em {{ .Values.config.OJU_S3_ENDPOINT }}.
+O bucket precisa de CORS para {{ .Values.config.OJU_CORS_ORIGINS }}.
+{{- end }}
+
+{{- if .Values.minio.enabled }}
+
+MinIO embutido: o bucket é criado pelo job "{{ include "openoju.fullname" . }}-minio-init".
+O endpoint público usado nas URLs assinadas é {{ .Values.config.OJU_S3_ENDPOINT }}.
+{{- end }}
+
+{{- if eq .Values.config.OJU_RATE_LIMIT_BACKEND "memory" }}
+
+Aviso: OJU_RATE_LIMIT_BACKEND=memory. Com replicaCount.api > 1 use "postgres".
+{{- end }}
+
+{{- if not .Values.vaapi.enabled }}
+
+Aviso: VAAPI desabilitado (padrão em nuvem). Análise roda em CPU.
+{{- end }}

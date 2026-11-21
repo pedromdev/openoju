@@ -9,12 +9,14 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..auth import require_org
+from ..config import get_settings
 from ..db import SessionLocal, get_db
 from ..models import Job
 from ..permissions import JOBS_CANCEL, JOBS_VIEW
 from ..schemas import JobOut
 from ..services.jobs import cancel_job, job_payload
 from ..services.serializers import job_out
+from ..storage import StorageError, get_storage
 from ..tenancy import AuthPrincipal, scoped_get, scoped_query
 
 router = APIRouter(prefix="/orgs/{slug}/jobs", tags=["jobs"])
@@ -62,6 +64,28 @@ def job_log(
     db: Session = Depends(get_db),
 ) -> FileResponse:
     job = scoped_get(db, Job, principal.organization_id or "", job_id, detail="job não encontrado")
+    if job.log_key:
+        settings = get_settings()
+        storage = get_storage(settings)
+        try:
+            body, length = storage.open_stream(job.log_key)
+        except StorageError as exc:
+            raise HTTPException(status_code=404, detail="log não encontrado") from exc
+
+        def chunks():
+            try:
+                while True:
+                    chunk = body.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                body.close()
+
+        headers = {"Content-Length": str(length)} if length else {}
+        return StreamingResponse(
+            chunks(), media_type="text/plain; charset=utf-8", headers=headers
+        )
     if not job.log_path:
         raise HTTPException(status_code=404, detail="log ainda não disponível")
     path = Path(job.log_path)

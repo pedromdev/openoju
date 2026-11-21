@@ -69,11 +69,11 @@ def create_session(
     if size > settings.upload_max_bytes:
         raise ValueError("arquivo maior que o limite configurado")
     free, _used, _total = shutil.disk_usage(settings.media_root)
-    if settings.storage_backend != "s3" and size + 256 * 1024 * 1024 > free:
+    if not settings.uses_object_storage and size + 256 * 1024 * 1024 > free:
         raise OSError("espaço insuficiente no SSD de mídia")
 
     backend = settings.storage_backend
-    part_size = settings.s3_part_size if backend == "s3" else settings.upload_chunk_size
+    part_size = settings.storage_part_size
     part_size = max(1, int(part_size))
     total_parts = int(math.ceil(size / part_size))
     upload_id = new_id()
@@ -81,7 +81,7 @@ def create_session(
         organization_id, "videos", f"{upload_id}-{clean_name}"
     )
     storage_upload_id = None
-    if backend == "s3":
+    if backend != "local":
         try:
             storage_upload_id = _storage(settings).create_multipart(
                 object_key, content_type="video/mp4"
@@ -113,7 +113,7 @@ def create_session(
 
 
 def part_urls(session: UploadSession, expires: int | None = None) -> list[str]:
-    if session.storage_backend != "s3" or not session.storage_upload_id:
+    if not get_settings().storage_presigned_parts or not session.storage_upload_id:
         return []
     settings = get_settings()
     storage = _storage(settings)
@@ -134,7 +134,7 @@ def get_session(db: Session, upload_id: str) -> UploadSession | None:
 
 
 def received_parts(session: UploadSession, settings: Settings) -> list[int]:
-    if session.storage_backend == "s3":
+    if session.storage_backend != "local":
         return sorted(
             int(part["part_number"]) for part in (session.parts or [])
         )
@@ -184,7 +184,7 @@ def save_part(
         raise ValueError("parte com tamanho diferente do esperado")
     if part_number == session.total_parts and len(data) != expected:
         raise ValueError("última parte com tamanho diferente do esperado")
-    if session.storage_backend == "s3":
+    if session.storage_backend != "local":
         if not session.storage_upload_id:
             raise ValueError("upload multipart não está mais ativo")
         storage = _storage(settings)
@@ -221,7 +221,7 @@ def save_part(
 
 
 def _cleanup_session(db: Session, session: UploadSession, settings: Settings) -> None:
-    if session.storage_backend == "s3" and session.storage_upload_id:
+    if session.storage_backend != "local" and session.storage_upload_id:
         _storage(settings).abort_multipart(
             session.object_key or "", session.storage_upload_id
         )
@@ -246,7 +246,7 @@ def _register_video(
         id=session.id,
         organization_id=session.organization_id,
         filename=session.filename,
-        source_path=None if session.storage_backend == "s3" else str(
+        source_path=None if session.storage_backend != "local" else str(
             settings.org_uploads_dir(session.organization_id)
             / f"{session.id}-{safe_filename(session.filename)}"
         ),
@@ -280,7 +280,7 @@ def complete_session(
     settings = settings or get_settings()
     settings.ensure_org_dirs(session.organization_id)
 
-    if session.storage_backend == "s3":
+    if session.storage_backend != "local":
         storage = _storage(settings)
         remote = storage.list_parts(
             session.object_key or "", session.storage_upload_id or ""
