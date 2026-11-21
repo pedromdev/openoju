@@ -697,6 +697,12 @@ def apply_outputs(values: dict, outputs: dict) -> dict:
         config["OJU_S3_ENDPOINT"] = outputs["s3_endpoint"]
     if outputs.get("s3_region"):
         config["OJU_S3_REGION"] = outputs["s3_region"]
+    if outputs.get("storage_account"):
+        config["OJU_AZURE_STORAGE_ACCOUNT"] = outputs["storage_account"]
+    if outputs.get("storage_container"):
+        config["OJU_AZURE_STORAGE_CONTAINER"] = outputs["storage_container"]
+    if outputs.get("storage_endpoint"):
+        config["OJU_AZURE_STORAGE_ENDPOINT"] = outputs["storage_endpoint"]
     annotations = outputs.get("service_account_annotations")
     if annotations:
         values.setdefault("serviceAccount", {})["annotations"] = annotations
