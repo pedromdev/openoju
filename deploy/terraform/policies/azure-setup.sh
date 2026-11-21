@@ -15,7 +15,7 @@ az account set --subscription "${SUBSCRIPTION_ID}"
 az account show --query '{name:name, id:id, tenant:tenantId}' -o table
 
 echo "==> registrando providers"
-for ns in Microsoft.ContainerService Microsoft.DBforPostgreSQL Microsoft.ManagedIdentity Microsoft.Network Microsoft.Compute; do
+for ns in Microsoft.ContainerService Microsoft.DBforPostgreSQL Microsoft.ManagedIdentity Microsoft.Network Microsoft.Compute Microsoft.Storage; do
   az provider register --namespace "${ns}" --wait >/dev/null
 done
 
